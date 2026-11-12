@@ -189,3 +189,27 @@ describe("Anthropic provider", () => {
     } finally { globalThis.fetch = orig; }
   });
 });
+
+describe("Anthropic thinking control", () => {
+  const run = async (model: string) => {
+    const orig = globalThis.fetch;
+    let sent: Record<string, unknown> = {};
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      sent = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      await callLLM({ ...DEFAULT_SETTINGS, mode: "api", provider: "anthropic", apiKey: "k", model }, "s", "u", 100);
+    } finally { globalThis.fetch = orig; }
+    return sent;
+  };
+  it("turns thinking off at low effort only for Haiku 5.x", async () => {
+    const haiku = await run("claude-haiku-5-5");
+    expect(haiku.thinking).toEqual({ type: "disabled" });
+    expect(haiku.output_config).toEqual({ effort: "low" });
+    const other = await run("claude-sonnet-5-5");
+    expect(other.thinking).toBeUndefined();
+    expect(other.output_config).toBeUndefined();
+  });
+});

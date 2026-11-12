@@ -96,6 +96,9 @@ async function callAnthropic(settings: Settings, system: string, user: string, m
       model: settings.model,
       // 모델이 답 앞에 생각(thinking)을 쓰면 작은 한도가 다 소진돼 빈 응답이 올 수 있어 넉넉히 준다
       max_tokens: Math.max(maxTokens * 5, 1024),
+      // Haiku 5.5는 생각이 기본 ON이라 짧은 답 대신 생각에 토큰을 다 써 빈 응답이 올 수 있다.
+      // 이 모델에서만 생각을 끄고 effort를 낮춘다 (다른 모델은 이 값이 400일 수 있어 보내지 않는다)
+      ...(/haiku-5/.test(settings.model) ? { thinking: { type: "disabled" }, output_config: { effort: "low" } } : {}),
       system,
       messages: [{ role: "user", content: user }],
     }),
