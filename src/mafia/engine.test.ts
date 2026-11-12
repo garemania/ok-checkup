@@ -148,7 +148,7 @@ describe("태오 mock speech", () => {
     const s = createGame("나");
     const taeo = s.players.find((p) => p.name === "태오")!;
     for (let i = 0; i < 6; i++) {
-      const t = await ai.speak(s, taeo);
+      const { text: t } = await ai.speak(s, taeo);
       expect(t).not.toMatch(/(요|습니다|니다)[.!?~]*$/);
     }
   }, 20000);
@@ -187,5 +187,50 @@ describe("Anthropic provider", () => {
       await expect(callLLM(cfg, "s", "u", 150)).rejects.toThrow(/stop_reason=max_tokens.*thinking/);
       expect(sent.max_tokens).toBeGreaterThanOrEqual(1024);
     } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("Anthropic thinking control", () => {
+  const run = async (model: string) => {
+    const orig = globalThis.fetch;
+    let sent: Record<string, unknown> = {};
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      sent = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      await callLLM({ ...DEFAULT_SETTINGS, mode: "api", provider: "anthropic", apiKey: "k", model }, "s", "u", 100);
+    } finally { globalThis.fetch = orig; }
+    return sent;
+  };
+  it("turns thinking off at low effort only for Haiku 5.x", async () => {
+    const haiku = await run("claude-haiku-5-5");
+    expect(haiku.thinking).toEqual({ type: "disabled" });
+    expect(haiku.output_config).toEqual({ effort: "low" });
+    const other = await run("claude-sonnet-5-5");
+    expect(other.thinking).toBeUndefined();
+    expect(other.output_config).toBeUndefined();
+  });
+});
+
+describe("emotion", () => {
+  it("parses [tag] prefixes and falls back to keywords", async () => {
+    const { parseSpoken, detectEmotion } = await import("./emotion");
+    expect(parseSpoken("[angry] 날 몰아가지 마.")).toEqual({ text: "날 몰아가지 마.", emotion: "angry" });
+    expect(parseSpoken("[Suspicious]  서연이 수상해")).toEqual({ text: "서연이 수상해", emotion: "suspicious" });
+    expect(parseSpoken("[unknown] 안녕").text).toBe("안녕");
+    expect(parseSpoken("너무 억울해").emotion).toBe("angry");
+    expect(detectEmotion("그냥 평범한 말")).toBe("neutral");
+  });
+  it("emotionOf follows the last line and shows dead faces", async () => {
+    const { emotionOf } = await import("./engine");
+    let s = createGame("나");
+    expect(emotionOf(s, 1)).toBe("neutral");
+    s = addMsg(s, 1, "x", undefined, "happy");
+    s = addMsg(s, 1, "y", undefined, "scared");
+    expect(emotionOf(s, 1)).toBe("scared");
+    s = kill(s, 1, false);
+    expect(emotionOf(s, 1)).toBe("dead");
   });
 });

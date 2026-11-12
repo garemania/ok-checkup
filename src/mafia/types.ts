@@ -1,3 +1,14 @@
+export type Emotion = "neutral" | "happy" | "angry" | "sad" | "surprised" | "suspicious" | "scared" | "smug";
+
+export interface Look {
+  hair: "short" | "long" | "bob" | "spiky" | "messy" | "bun" | "wild";
+  hairColor: string;
+  ears: "fox" | "bear" | "rabbit" | "cat" | "wolf" | "owl" | null;
+  accessory: "none" | "shades" | "glasses" | "scar" | "headband" | "stubble" | "whiskers";
+  browWidth?: number; // 눈썹 굵기
+  heavyBags?: boolean; // 짙은 다크서클
+}
+
 export type Role = "mafia" | "police" | "doctor" | "citizen";
 export type Phase = "intro" | "night" | "day" | "vote" | "gameover";
 
@@ -8,6 +19,7 @@ export interface Player {
   color: number; // hsl hue
   persona: string;
   speech: string; // 말투 힌트
+  look: Look;
   role: Role;
   alive: boolean;
   isHuman: boolean;
@@ -20,6 +32,7 @@ export interface ChatMsg {
   phase: Phase;
   from: number | "system";
   text: string;
+  emotion?: Emotion;
 }
 
 export interface WhisperMsg {
@@ -27,6 +40,7 @@ export interface WhisperMsg {
   day: number;
   from: number; // 발신자 id
   text: string;
+  emotion?: Emotion;
 }
 
 export interface Investigation {
