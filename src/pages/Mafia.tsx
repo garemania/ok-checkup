@@ -16,7 +16,7 @@ import { tallyVotes } from "@/mafia/engine";
 import { ROLE_EMOJI, ROLE_LABEL } from "@/mafia/types";
 
 const Mafia = () => {
-  const g = useMafiaGame((m) => toast.error(m));
+  const g = useMafiaGame((m) => toast.error(m, { duration: 15000 }));
   const { state } = g;
   const [whisperId, setWhisperId] = useState<number | null>(null);
   const [target, setTarget] = useState<number | null>(null);
@@ -42,7 +42,7 @@ const Mafia = () => {
           <Button size="lg" variant="secondary" onClick={() => setSettingsOpen(true)}><Settings className="mr-1 h-4 w-4" />설정</Button>
         </div>
         <p className="text-xs text-muted-foreground">현재 AI: {g.settings.mode === "api" ? (g.settings.provider === "gemini" ? `Gemini (${g.settings.geminiModel})` : `Claude API (${g.settings.model})`) : "오프라인 AI (설정에서 API 연결 가능)"}</p>
-        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} />
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
       </div>
     );
   }
@@ -120,7 +120,7 @@ const Mafia = () => {
         onPick={canPick ? setTarget : undefined}
         pickLabel={pickLabel}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} />
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
       <InfoDialog state={state} open={infoOpen} onOpenChange={setInfoOpen} />
 
       <Dialog open={state.phase === "gameover"}>

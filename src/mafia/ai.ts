@@ -197,7 +197,7 @@ async function askTarget(settings: Settings, s: GameState, p: Player, cands: num
   const second = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[이전 답변이 형식에 맞지 않았습니다] 위 후보 중 id 숫자 하나만 골라 {"${key}": 숫자} 형식으로만 답하세요.`, 200);
   const r2 = parseTarget(second, cands, names);
   if (r2 !== undefined) return r2;
-  throw new Error(`${key} parse: ${second.slice(0, 80)}`);
+  throw new Error(`${key} parse: ${second.slice(0, 200) || "(빈 응답)"}`);
 }
 
 /* ------------------------------------------------------------------ */

@@ -33,6 +33,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
   const [typing, setTyping] = useState<number | null>(null); // 1:1 답장 작성 중인 AI
+  const [errors, setErrors] = useState<string[]>([]); // 최근 API 오류 (설정 화면에서 확인/복사)
   const [unread, setUnread] = useState<Record<number, boolean>>({});
   const ref = useRef<GameState | null>(null);
   const runId = useRef(0);
@@ -48,7 +49,10 @@ export function useMafiaGame(onError: (msg: string) => void) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   };
 
-  const ai = useCallback(() => makeAI(settings, (e) => onError(`API 호출 실패 → 오프라인 AI로 대체합니다. (${e.message})`)), [settings, onError]);
+  const ai = useCallback(() => makeAI(settings, (e) => {
+    setErrors((prev) => [`[${new Date().toLocaleTimeString("ko-KR")}] ${e.message}`, ...prev].slice(0, 5));
+    onError(`API 호출 실패 → 오프라인 AI로 대체합니다. (${e.message})`);
+  }), [settings, onError]);
 
   const alivePhaseGuard = (id: number) => runId.current === id;
 
@@ -255,7 +259,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   return {
-    settings, setSettings, state, busy, speaking, typing, unread, clearUnread,
+    settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
     startGame, quit, runNight, runRound, sendPublic, startVote, runVote,
     sendWhisper, whisperBlockReason, ...helpers,
   };
