@@ -5,6 +5,8 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // GitHub Pages 등 하위 경로 배포 시 VITE_BASE=/저장소명/ 로 지정
+  base: process.env.VITE_BASE ?? "/",
   server: {
     host: "::",
     port: 8080,
