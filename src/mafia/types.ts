@@ -53,7 +53,10 @@ export interface GameState {
 
 export interface Settings {
   mode: "mock" | "api";
-  apiKey: string;
+  provider: "anthropic" | "gemini";
+  geminiKey: string;
+  geminiModel: string;
+  apiKey: string; // Anthropic
   baseUrl: string;
   model: string;
   nickname: string;

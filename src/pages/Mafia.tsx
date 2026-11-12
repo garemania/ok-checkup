@@ -41,7 +41,7 @@ const Mafia = () => {
           <Button size="lg" onClick={g.startGame}>게임 시작</Button>
           <Button size="lg" variant="secondary" onClick={() => setSettingsOpen(true)}><Settings className="mr-1 h-4 w-4" />설정</Button>
         </div>
-        <p className="text-xs text-muted-foreground">현재 AI: {g.settings.mode === "api" ? `Claude API (${g.settings.model})` : "오프라인 AI (설정에서 API 연결 가능)"}</p>
+        <p className="text-xs text-muted-foreground">현재 AI: {g.settings.mode === "api" ? (g.settings.provider === "gemini" ? `Gemini (${g.settings.geminiModel})` : `Claude API (${g.settings.model})`) : "오프라인 AI (설정에서 API 연결 가능)"}</p>
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} />
       </div>
     );
