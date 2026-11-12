@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Settings } from "../types";
 
-export function SettingsDialog({ open, onOpenChange, settings, onSave }: { open: boolean; onOpenChange: (o: boolean) => void; settings: Settings; onSave: (s: Settings) => void }) {
+export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = [], onClearErrors }: { open: boolean; onOpenChange: (o: boolean) => void; settings: Settings; onSave: (s: Settings) => void; errors?: string[]; onClearErrors?: () => void }) {
   const [s, setS] = useState(settings);
   const api = s.mode === "api";
   return (
@@ -68,6 +68,18 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: { open:
             </>
           )}
         </div>
+        {errors.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>최근 API 오류</Label>
+              <div className="flex gap-1">
+                <Button type="button" size="sm" variant="secondary" onClick={() => void navigator.clipboard?.writeText(errors.join("\n\n"))}>복사</Button>
+                {onClearErrors && <Button type="button" size="sm" variant="ghost" onClick={onClearErrors}>지우기</Button>}
+              </div>
+            </div>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 p-2 text-[11px] leading-snug">{errors.join("\n\n")}</pre>
+          </div>
+        )}
         <DialogFooter>
           <Button onClick={() => { onSave(s); onOpenChange(false); }}>저장</Button>
         </DialogFooter>
