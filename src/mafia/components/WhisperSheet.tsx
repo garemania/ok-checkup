@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { HUMAN_ID, MAX_WHISPERS_PER_DAY } from "../data";
 import { ROLE_LABEL } from "../types";
 import type { GameState } from "../types";
+import { FaceArt } from "./FaceArt";
 
 interface Props {
   state: GameState;
@@ -33,7 +34,7 @@ export function WhisperSheet({ state, targetId, typing, blockReason, onClose, on
           <>
             <SheetHeader className="border-b border-border p-4 text-left">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full text-2xl" style={{ background: `hsl(${p.color} 55% 38%)` }}>{p.emoji}</div>
+                <FaceArt look={p.look} hue={p.color} emotion={p.alive ? [...msgs].reverse().find((m) => m.from !== HUMAN_ID)?.emotion ?? "neutral" : "dead"} className="h-16 w-16 shrink-0 rounded-lg" rough />
                 <div className="flex-1">
                   <SheetTitle>{p.name} {!p.alive && <span className="text-sm text-muted-foreground">(사망{p.revealed ? ` · ${ROLE_LABEL[p.role]}` : ""})</span>}</SheetTitle>
                   <SheetDescription className="text-xs">{p.persona}</SheetDescription>
@@ -53,7 +54,8 @@ export function WhisperSheet({ state, targetId, typing, blockReason, onClose, on
                 const mine = m.from === HUMAN_ID;
                 return (
                   <div key={m.id} className={cn("flex", mine && "justify-end")}>
-                    <div className={cn("max-w-[80%] rounded-2xl px-3 py-2 text-sm", mine ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-secondary")}>{m.text}</div>
+                    {!mine && <FaceArt look={p.look} hue={p.color} emotion={m.emotion ?? "neutral"} className="mr-2 h-9 w-9 shrink-0 self-end rounded-md" />}
+                    <div className={cn("max-w-[75%] rounded-2xl px-3 py-2 text-sm", mine ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-secondary")}>{m.text}</div>
                   </div>
                 );
               })}

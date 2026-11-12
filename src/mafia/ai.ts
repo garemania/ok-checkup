@@ -1,7 +1,10 @@
 import { alive, logToText, mafiaPartners, nameOf, pick } from "./engine";
 import { HUMAN_ID } from "./data";
+import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
-import type { GameState, Player, Settings } from "./types";
+import type { Emotion, GameState, Player, Settings } from "./types";
+
+export interface Spoken { text: string; emotion: Emotion }
 
 /* ------------------------------------------------------------------ */
 /* LLM 호출                                                            */
@@ -211,11 +214,13 @@ async function askTarget(settings: Settings, s: GameState, p: Player, cands: num
 /* ------------------------------------------------------------------ */
 
 export interface AI {
-  speak(s: GameState, p: Player, hint?: string): Promise<string>;
+  speak(s: GameState, p: Player, hint?: string): Promise<Spoken>;
   vote(s: GameState, p: Player): Promise<number | null>;
   nightTarget(s: GameState, p: Player, kind: "kill" | "protect" | "investigate"): Promise<number>;
-  whisper(s: GameState, p: Player, userText: string): Promise<string>;
+  whisper(s: GameState, p: Player, userText: string): Promise<Spoken>;
 }
+
+const EMOTION_RULE = `발언 맨 앞에 지금 표정을 [감정] 태그로 붙이세요. 감정은 neutral, happy, angry, sad, surprised, suspicious, scared, smug 중 하나입니다. 예: [suspicious] 서연, 아까 말이 좀 이상했어.`;
 
 export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
   const mock = makeMockAI();
@@ -231,8 +236,9 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
     speak: (s, p, hint) =>
       safe(async () => {
         const task = `지금 당신의 발언 차례입니다. ${hint ?? "지금까지의 흐름을 보고 한 번 발언하세요."}
-1~2문장, 80자 이내로 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.`;
-        return clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name);
+1~2문장, 80자 이내로 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.
+${EMOTION_RULE}`;
+        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
       }, () => mock.speak(s, p, hint)),
     vote: (s, p) =>
       safe(async () => {
@@ -251,8 +257,9 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
       safe(async () => {
         const night = s.phase === "night";
         const task = `${s.players[HUMAN_ID].name}가 당신에게 1:1 비밀 대화로 말했습니다: "${userText}"
-${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.`;
-        return clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name);
+${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.
+${EMOTION_RULE}`;
+        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
       }, () => mock.whisper(s, p, userText)),
   };
 }
@@ -301,7 +308,7 @@ function taeoLine(kind: "reply" | "police" | "accused" | "first" | "suspect", tn
 }
 
 function makeMockAI(): AI {
-  return {
+  const raw = {
     async speak(s, p, hint) {
       await wait(350 + Math.random() * 400);
       const sc = suspicion(s, p);
@@ -367,6 +374,19 @@ function makeMockAI(): AI {
           : pick(["그건 아직 밝히기 곤란해. 일단 네 생각부터 말해줘.", "직업은 지금 말하긴 좀 위험하잖아. 토론에서 보자.", "나는 시민 쪽이라고 믿어줘. " + name + "을(를) 같이 지켜보자."]);
       }
       return pick([`음, 나는 ${name}이(가) 좀 신경 쓰여. 너는 어때?`, "좋은 생각이야. 토론에서 같이 밀어보자.", "일단 투표 전까지 더 지켜보자. 너무 서두르면 위험해."]);
+    },
+  };
+  // 오프라인 AI도 대사 내용에 맞춰 표정을 붙인다
+  return {
+    speak: async (s, p, hint) => {
+      const text = await raw.speak(s, p, hint);
+      return { text, emotion: detectEmotion(text) };
+    },
+    vote: raw.vote,
+    nightTarget: raw.nightTarget,
+    whisper: async (s, p, t) => {
+      const text = await raw.whisper(s, p, t);
+      return { text, emotion: detectEmotion(text) };
     },
   };
 }

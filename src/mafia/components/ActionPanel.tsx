@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { HUMAN_ID, MAX_ROUNDS } from "../data";
 import { alive } from "../engine";
 import type { GameState } from "../types";
+import { FaceArt } from "./FaceArt";
 
 interface Props {
   state: GameState;
@@ -41,7 +42,7 @@ export function ActionPanel({ state, busy, target, setTarget, onNight, onRound, 
             onClick={() => setTarget(target === p.id ? null : p.id)}
             className={cn("flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm transition", target === p.id ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary hover:bg-secondary/70")}
           >
-            <span>{p.emoji}</span>{p.name}
+            <FaceArt look={p.look} hue={p.color} emotion="neutral" className="h-6 w-6 rounded" />{p.name}
           </button>
         ))}
     </div>

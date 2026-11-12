@@ -3,7 +3,7 @@ import { makeAI } from "./ai";
 import { HUMAN_ID, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, nameOf, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
-import type { GameState, Settings } from "./types";
+import type { Emotion, GameState, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
 export const DEFAULT_SETTINGS: Settings = {
@@ -144,9 +144,9 @@ export function useMafiaGame(onError: (msg: string) => void) {
     for (const p of speakerOrder()) {
       if (!alivePhaseGuard(id)) return;
       setSpeaking(p.id);
-      const text = await engine.speak(ref.current!, ref.current!.players[p.id]);
+      const said = await engine.speak(ref.current!, ref.current!.players[p.id]);
       if (!alivePhaseGuard(id)) return;
-      commit((x) => addMsg(x, p.id, text));
+      commit((x) => addMsg(x, p.id, said.text, undefined, said.emotion));
       await sleep(250);
     }
     setSpeaking(null);
@@ -171,7 +171,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
       const reply = await engine.speak(ref.current!, ref.current!.players[p.id],
         `플레이어(${cur.players[HUMAN_ID].name})가 방금 발언했습니다. ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`);
       if (!alivePhaseGuard(id)) return;
-      commit((x) => addMsg(x, p.id, reply));
+      commit((x) => addMsg(x, p.id, reply.text, undefined, reply.emotion));
       await sleep(200);
     }
     setSpeaking(null);
@@ -234,9 +234,9 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const sendWhisper = async (targetId: number, text: string) => {
     if (!text.trim() || whisperBlockReason(targetId) || typing !== null) return;
     const id = runId.current;
-    const wmsg = (from: number, t: string) => (x: GameState): GameState => ({
+    const wmsg = (from: number, t: string, emotion?: Emotion) => (x: GameState): GameState => ({
       ...x,
-      whispers: { ...x.whispers, [targetId]: [...(x.whispers[targetId] ?? []), { id: x.nextMsgId, day: x.day, from, text: t }] },
+      whispers: { ...x.whispers, [targetId]: [...(x.whispers[targetId] ?? []), { id: x.nextMsgId, day: x.day, from, text: t, emotion }] },
       nextMsgId: x.nextMsgId + 1,
     });
     commit(wmsg(HUMAN_ID, text.trim()));
@@ -246,7 +246,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     const s = ref.current!;
     const reply = await engine.whisper(s, s.players[targetId], text.trim());
     if (!alivePhaseGuard(id)) return;
-    commit(wmsg(targetId, reply));
+    commit(wmsg(targetId, reply.text, reply.emotion));
     setTyping(null);
     setUnread((u) => ({ ...u, [targetId]: true }));
   };

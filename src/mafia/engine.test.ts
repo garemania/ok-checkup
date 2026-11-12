@@ -148,7 +148,7 @@ describe("태오 mock speech", () => {
     const s = createGame("나");
     const taeo = s.players.find((p) => p.name === "태오")!;
     for (let i = 0; i < 6; i++) {
-      const t = await ai.speak(s, taeo);
+      const { text: t } = await ai.speak(s, taeo);
       expect(t).not.toMatch(/(요|습니다|니다)[.!?~]*$/);
     }
   }, 20000);
@@ -211,5 +211,26 @@ describe("Anthropic thinking control", () => {
     const other = await run("claude-sonnet-5-5");
     expect(other.thinking).toBeUndefined();
     expect(other.output_config).toBeUndefined();
+  });
+});
+
+describe("emotion", () => {
+  it("parses [tag] prefixes and falls back to keywords", async () => {
+    const { parseSpoken, detectEmotion } = await import("./emotion");
+    expect(parseSpoken("[angry] 날 몰아가지 마.")).toEqual({ text: "날 몰아가지 마.", emotion: "angry" });
+    expect(parseSpoken("[Suspicious]  서연이 수상해")).toEqual({ text: "서연이 수상해", emotion: "suspicious" });
+    expect(parseSpoken("[unknown] 안녕").text).toBe("안녕");
+    expect(parseSpoken("너무 억울해").emotion).toBe("angry");
+    expect(detectEmotion("그냥 평범한 말")).toBe("neutral");
+  });
+  it("emotionOf follows the last line and shows dead faces", async () => {
+    const { emotionOf } = await import("./engine");
+    let s = createGame("나");
+    expect(emotionOf(s, 1)).toBe("neutral");
+    s = addMsg(s, 1, "x", undefined, "happy");
+    s = addMsg(s, 1, "y", undefined, "scared");
+    expect(emotionOf(s, 1)).toBe("scared");
+    s = kill(s, 1, false);
+    expect(emotionOf(s, 1)).toBe("dead");
   });
 });

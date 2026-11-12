@@ -1,5 +1,5 @@
 import { AI_CHARS, HUMAN_CHAR, HUMAN_ID, ROLE_POOL } from "./data";
-import type { ChatMsg, GameState, Phase, Player } from "./types";
+import type { ChatMsg, Emotion, GameState, Phase, Player } from "./types";
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -22,6 +22,7 @@ export function createGame(nickname: string): GameState {
     color: c.color,
     persona: c.persona,
     speech: c.speech,
+    look: c.look,
     role: roles[i],
     alive: true,
     isHuman: i === HUMAN_ID,
@@ -53,8 +54,8 @@ export function mafiaPartners(s: GameState, id: number): Player[] {
   return s.players.filter((p) => p.role === "mafia" && p.id !== id);
 }
 
-export function addMsg(s: GameState, from: ChatMsg["from"], text: string, phase?: Phase): GameState {
-  const msg: ChatMsg = { id: s.nextMsgId, day: s.day, phase: phase ?? s.phase, from, text };
+export function addMsg(s: GameState, from: ChatMsg["from"], text: string, phase?: Phase, emotion?: ChatMsg["emotion"]): GameState {
+  const msg: ChatMsg = { id: s.nextMsgId, day: s.day, phase: phase ?? s.phase, from, text, emotion };
   return { ...s, log: [...s.log, msg], nextMsgId: s.nextMsgId + 1 };
 }
 
@@ -108,4 +109,14 @@ export function wasPhrase(word: string): string {
   const code = word.charCodeAt(word.length - 1);
   const hasBatchim = code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0;
   return `${word}${hasBatchim ? "이었" : "였"}습니다`;
+}
+
+/** 캐릭터의 현재 표정: 사망이면 dead, 아니면 마지막 공개 발언의 감정 */
+export function emotionOf(s: GameState, id: number): Emotion | "dead" {
+  if (!s.players[id].alive) return "dead";
+  for (let i = s.log.length - 1; i >= 0; i--) {
+    const m = s.log[i];
+    if (m.from === id && m.emotion) return m.emotion;
+  }
+  return "neutral";
 }

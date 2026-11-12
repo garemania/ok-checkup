@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Face } from "@/mafia/components/Face";
 import { TopBar } from "@/mafia/components/TopBar";
+import { InkDefs } from "@/mafia/components/FaceArt";
+import { SpeakerStage } from "@/mafia/components/SpeakerStage";
 import { ChatLog } from "@/mafia/components/ChatLog";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
 import { WhisperSheet } from "@/mafia/components/WhisperSheet";
@@ -12,7 +14,7 @@ import { SettingsDialog } from "@/mafia/components/SettingsDialog";
 import { InfoDialog } from "@/mafia/components/InfoDialog";
 import { useMafiaGame } from "@/mafia/useMafiaGame";
 import { HUMAN_ID } from "@/mafia/data";
-import { tallyVotes } from "@/mafia/engine";
+import { emotionOf, tallyVotes } from "@/mafia/engine";
 import { ROLE_EMOJI, ROLE_LABEL } from "@/mafia/types";
 
 const Mafia = () => {
@@ -63,6 +65,7 @@ const Mafia = () => {
 
   return (
     <div className={`min-h-screen transition-colors duration-700 ${night ? "bg-[hsl(230_35%_7%)]" : "bg-background"}`}>
+      <InkDefs />
       <div className="mx-auto flex h-screen max-w-3xl flex-col gap-3 p-3 sm:p-4">
         <TopBar state={state} onSettings={() => setSettingsOpen(true)} onInfo={() => setInfoOpen(true)} />
 
@@ -74,6 +77,7 @@ const Mafia = () => {
               <Face
                 key={p.id}
                 player={p}
+                emotion={emotionOf(state, p.id)}
                 isMe={p.isHuman}
                 speaking={g.speaking === p.id}
                 showRole={known}
@@ -86,6 +90,8 @@ const Mafia = () => {
             );
           })}
         </section>
+
+        <SpeakerStage state={state} />
 
         <main className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-card/40">
           <ChatLog state={state} speaking={g.speaking} />

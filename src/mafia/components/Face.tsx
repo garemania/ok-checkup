@@ -1,9 +1,11 @@
 import { cn } from "@/lib/utils";
 import { ROLE_EMOJI } from "../types";
-import type { Player } from "../types";
+import type { Emotion, Player } from "../types";
+import { FaceArt } from "./FaceArt";
 
 interface Props {
   player: Player;
+  emotion: Emotion | "dead";
   isMe: boolean;
   speaking: boolean;
   showRole: boolean; // 내가 알고 있는 직업 표시 (본인/마피아 동료/게임 종료)
@@ -15,7 +17,7 @@ interface Props {
   onClick: () => void;
 }
 
-export function Face({ player: p, isMe, speaking, showRole, mark, voteCount, votedByMe, unread, selected, onClick }: Props) {
+export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteCount, votedByMe, unread, selected, onClick }: Props) {
   return (
     <button
       onClick={onClick}
@@ -28,14 +30,12 @@ export function Face({ player: p, isMe, speaking, showRole, mark, voteCount, vot
     >
       <div
         className={cn(
-          "relative flex h-14 w-14 items-center justify-center rounded-full text-3xl shadow-md transition sm:h-16 sm:w-16 sm:text-4xl",
+          "relative h-14 w-14 rounded-lg shadow-md transition sm:h-16 sm:w-16",
           speaking && "ring-4 ring-primary ring-offset-2 ring-offset-background animate-pulse",
-          !p.alive && "opacity-40 grayscale",
+          !p.alive && "opacity-60 grayscale",
         )}
-        style={{ background: `linear-gradient(135deg, hsl(${p.color} 60% 45%), hsl(${(p.color + 40) % 360} 55% 28%))` }}
       >
-        <span>{p.emoji}</span>
-        {!p.alive && <span className="absolute inset-0 flex items-center justify-center text-4xl text-destructive">✕</span>}
+        <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg" rough />
         {unread && <span className="absolute -right-0.5 top-0 h-3.5 w-3.5 rounded-full border-2 border-background bg-destructive" />}
         {mark && (
           <span className={cn("absolute -bottom-1 -left-1 rounded-full px-1 text-[10px] font-bold", mark === "mafia" ? "bg-destructive text-destructive-foreground" : "bg-success text-background")}>
