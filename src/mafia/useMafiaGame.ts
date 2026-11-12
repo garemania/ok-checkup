@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI } from "./ai";
 import { HUMAN_ID, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
-import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, nameOf, tallyVotes } from "./engine";
+import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, nameOf, tallyVotes, wasPhrase } from "./engine";
+import { ROLE_LABEL } from "./types";
 import type { GameState, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
@@ -203,7 +204,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
       commit((x) => addMsg(x, "system", "동점이거나 표가 없어 아무도 처형되지 않았습니다.", "vote"));
     } else {
       commit((x) => kill(x, executed, true));
-      commit((x) => addMsg(x, "system", `⚖️ ${nameOf(x, executed)}님이 처형되었습니다. 정체는 ${({ mafia: "마피아", police: "경찰", doctor: "의사", citizen: "시민" })[x.players[executed].role]}였습니다.`, "vote"));
+      commit((x) => addMsg(x, "system", `⚖️ ${nameOf(x, executed)}님이 처형되었습니다. 정체는 ${wasPhrase(ROLE_LABEL[x.players[executed].role])}.`, "vote"));
     }
     commit(finishIfWon);
     if (ref.current!.phase !== "gameover") {

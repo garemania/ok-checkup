@@ -92,3 +92,52 @@ describe("Gemini provider", () => {
     }
   });
 });
+
+describe("wasPhrase", () => {
+  it("picks 이었/였 by final consonant", async () => {
+    const { wasPhrase } = await import("./engine");
+    expect(["마피아", "경찰", "의사", "시민"].map(wasPhrase)).toEqual(["마피아였습니다", "경찰이었습니다", "의사였습니다", "시민이었습니다"]);
+  });
+});
+
+describe("API resilience", () => {
+  const gem = { ...DEFAULT_SETTINGS, mode: "api" as const, provider: "gemini" as const, geminiKey: "k" };
+  const ok = () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 });
+
+  it("retries 429 and then succeeds", async () => {
+    const orig = globalThis.fetch;
+    let n = 0;
+    globalThis.fetch = (async () => (++n < 3 ? new Response("{}", { status: 429, headers: { "retry-after": "0" } }) : ok())) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      expect(await callLLM(gem, "s", "u", 50)).toBe("ok");
+      expect(n).toBe(3);
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it("does not retry a daily quota error", async () => {
+    const orig = globalThis.fetch;
+    let n = 0;
+    globalThis.fetch = (async () => { n++; return new Response('{"error":{"message":"GenerateRequestsPerDayPerProjectPerModel"}}', { status: 429 }); }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      await expect(callLLM(gem, "s", "u", 50)).rejects.toThrow(/429/);
+      expect(n).toBe(1);
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it("limits concurrent requests", async () => {
+    const orig = globalThis.fetch;
+    let running = 0, peak = 0;
+    globalThis.fetch = (async () => {
+      running++; peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 20));
+      running--; return ok();
+    }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      await Promise.all(Array.from({ length: 7 }, () => callLLM(gem, "s", "u", 50)));
+      expect(peak).toBeLessThanOrEqual(2);
+    } finally { globalThis.fetch = orig; }
+  });
+});
