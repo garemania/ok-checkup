@@ -7,7 +7,7 @@ import { Face } from "@/mafia/components/Face";
 import { TopBar } from "@/mafia/components/TopBar";
 import { InkDefs } from "@/mafia/components/FaceArt";
 import { SpeakerStage } from "@/mafia/components/SpeakerStage";
-import { ChatLog } from "@/mafia/components/ChatLog";
+import { LogSheet } from "@/mafia/components/LogSheet";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
 import { WhisperSheet } from "@/mafia/components/WhisperSheet";
 import { SettingsDialog } from "@/mafia/components/SettingsDialog";
@@ -24,6 +24,7 @@ const Mafia = () => {
   const [target, setTarget] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
 
   // 게임 시작 직후 직업 안내
   const day = state?.day;
@@ -67,7 +68,7 @@ const Mafia = () => {
     <div className={`min-h-screen transition-colors duration-700 ${night ? "bg-[hsl(230_35%_7%)]" : "bg-background"}`}>
       <InkDefs />
       <div className="mx-auto flex h-screen max-w-3xl flex-col gap-3 p-3 sm:p-4">
-        <TopBar state={state} onSettings={() => setSettingsOpen(true)} onInfo={() => setInfoOpen(true)} />
+        <TopBar state={state} onSettings={() => setSettingsOpen(true)} onInfo={() => setInfoOpen(true)} onLog={() => setLogOpen(true)} />
 
         <section className="grid grid-cols-4 gap-1 rounded-2xl border border-border bg-card/60 p-2">
           {state.players.map((p) => {
@@ -91,11 +92,7 @@ const Mafia = () => {
           })}
         </section>
 
-        <SpeakerStage state={state} />
-
-        <main className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-card/40">
-          <ChatLog state={state} speaking={g.speaking} />
-        </main>
+        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} onNext={g.advance} />
 
         <footer className="rounded-2xl border border-border bg-card">
           {target !== null && (state.phase === "night" || state.phase === "vote") && (
@@ -127,6 +124,7 @@ const Mafia = () => {
         pickLabel={pickLabel}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
+      <LogSheet state={state} open={logOpen} onOpenChange={setLogOpen} />
       <InfoDialog state={state} open={infoOpen} onOpenChange={setInfoOpen} />
 
       <Dialog open={state.phase === "gameover"}>
