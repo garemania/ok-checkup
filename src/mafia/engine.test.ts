@@ -153,3 +153,22 @@ describe("태오 mock speech", () => {
     }
   }, 20000);
 });
+
+describe("parseTarget", () => {
+  const names = { 1: "서연", 2: "도윤", 3: "하은" };
+  it("accepts ids, numeric strings, names and code fences", async () => {
+    const { parseTarget } = await import("./ai");
+    const c = [1, 2, 3];
+    expect(parseTarget('{"target": 2, "reason": "x"}', c, names)).toBe(2);
+    expect(parseTarget('{"target": "3"}', c, names)).toBe(3);
+    expect(parseTarget('{"target": "도윤", "reason": "수상"}', c, names)).toBe(2);
+    expect(parseTarget('```json\n{"vote": 1}\n```', c, names)).toBe(1);
+    expect(parseTarget("하은을 노리겠다", c, names)).toBe(3);
+    expect(parseTarget('{"vote": null}', c, names)).toBeNull();
+  });
+  it("rejects non-candidates", async () => {
+    const { parseTarget } = await import("./ai");
+    expect(parseTarget('{"target": 7}', [1, 2], names)).toBeUndefined();
+    expect(parseTarget("모르겠다", [1, 2], names)).toBeUndefined();
+  });
+});
