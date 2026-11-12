@@ -158,19 +158,46 @@ ${w ? `[${s.players[HUMAN_ID].name}와(과) 나눈 1:1 비밀 대화]\n${w}` : "
 const clean = (t: string, name: string) =>
   t.replace(new RegExp(`^\\s*["“]?${name}\\s*[:：]\\s*`), "").replace(/^["“'`]+|["”'`]+$/g, "").trim().slice(0, 200);
 
-function parseTarget(text: string, candidates: number[]): number | null | undefined {
+/** id(숫자/문자열) 또는 이름으로 답해도 후보 중에서 대상을 찾아낸다. 못 찾으면 undefined */
+export function parseTarget(text: string, candidates: number[], names: Record<number, string> = {}): number | null | undefined {
+  const byName = (v: string): number | undefined => {
+    const hit = candidates.filter((id) => names[id] && v.includes(names[id]));
+    return hit.length === 1 ? hit[0] : undefined;
+  };
   try {
     const m = text.match(/\{[\s\S]*\}/);
     if (m) {
       const j = JSON.parse(m[0]);
       const v = j.target ?? j.vote;
-      if (v === null || v === "none") return null;
+      if (v === null || v === "none" || v === "기권") return null;
       if (candidates.includes(Number(v))) return Number(v);
+      if (typeof v === "string") {
+        const n = byName(v);
+        if (n !== undefined) return n;
+      }
     }
-  } catch { /* fall through */ }
-  const n = text.match(/\d+/);
-  if (n && candidates.includes(Number(n[0]))) return Number(n[0]);
+  } catch { /* JSON이 아니면 아래에서 텍스트로 찾는다 */ }
+  const num = text.match(/"?(?:target|vote)"?\s*[:=]\s*"?(\d+)/i) ?? text.match(/^\s*(\d+)\s*$/);
+  if (num && candidates.includes(Number(num[1]))) return Number(num[1]);
+  const n = byName(text);
+  if (n !== undefined) return n;
+  const any = text.match(/\d+/);
+  if (any && candidates.includes(Number(any[0]))) return Number(any[0]);
   return undefined;
+}
+
+/** 대상 선택 호출: 해석에 실패하면 형식을 다시 알려 주고 한 번 더 묻는다 */
+async function askTarget(settings: Settings, s: GameState, p: Player, cands: number[], task: string, key: "vote" | "target"): Promise<number | null> {
+  const names = Object.fromEntries(cands.map((id) => [id, s.players[id].name]));
+  const list = cands.map((id) => `${id}:${names[id]}`).join(", ");
+  const prompt = `${stateBlock(s, p)}\n\n${task}\n후보(id:이름): ${list}\n반드시 JSON 한 줄만 출력: {"${key}": <후보의 id 숫자>, "reason": "짧은 이유"}`;
+  const first = await callLLM(settings, systemPrompt(s, p), prompt, 200);
+  const r1 = parseTarget(first, cands, names);
+  if (r1 !== undefined) return r1;
+  const second = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[이전 답변이 형식에 맞지 않았습니다] 위 후보 중 id 숫자 하나만 골라 {"${key}": 숫자} 형식으로만 답하세요.`, 200);
+  const r2 = parseTarget(second, cands, names);
+  if (r2 !== undefined) return r2;
+  throw new Error(`${key} parse: ${second.slice(0, 80)}`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -204,22 +231,14 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
     vote: (s, p) =>
       safe(async () => {
         const cands = alive(s).filter((x) => x.id !== p.id).map((x) => x.id);
-        const task = `투표 시간입니다. 처형할 사람의 id를 고르세요. 후보 id: ${cands.join(", ")}.
-JSON만 출력: {"vote": <id>, "reason": "짧은 이유"}`;
-        const t = await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 150);
-        const r = parseTarget(t, cands);
-        if (r === undefined) throw new Error("vote parse");
-        return r;
+        return askTarget(settings, s, p, cands, "투표 시간입니다. 처형할 사람을 고르세요. (기권하려면 null)", "vote");
       }, () => mock.vote(s, p)),
     nightTarget: (s, p, kind) =>
       safe(async () => {
         const cands = alive(s).filter((x) => (kind === "protect" ? true : x.id !== p.id) && !(kind === "kill" && x.role === "mafia")).map((x) => x.id);
         const verb = { kill: "살해할", protect: "보호할", investigate: "조사할" }[kind];
-        const task = `밤입니다. ${verb} 사람의 id를 고르세요. 후보 id: ${cands.join(", ")}.
-JSON만 출력: {"target": <id>, "reason": "짧은 이유"}`;
-        const t = await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 150);
-        const r = parseTarget(t, cands);
-        if (r === undefined || r === null) throw new Error("night parse");
+        const r = await askTarget(settings, s, p, cands, `밤입니다. ${verb} 사람을 고르세요.`, "target");
+        if (r === null) throw new Error("target parse: null");
         return r;
       }, () => mock.nightTarget(s, p, kind)),
     whisper: (s, p, userText) =>
