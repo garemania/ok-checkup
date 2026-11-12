@@ -94,15 +94,18 @@ async function callAnthropic(settings: Settings, system: string, user: string, m
     headers,
     body: JSON.stringify({
       model: settings.model,
-      max_tokens: maxTokens,
+      // 모델이 답 앞에 생각(thinking)을 쓰면 작은 한도가 다 소진돼 빈 응답이 올 수 있어 넉넉히 준다
+      max_tokens: Math.max(maxTokens * 5, 1024),
       system,
       messages: [{ role: "user", content: user }],
     }),
   });
   if (!res.ok) await failFrom("API", res);
   const data = await res.json();
-  const text = (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
-  return text.trim();
+  const blocks: { type: string; text?: string }[] = data.content ?? [];
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+  if (!text) throw new Error(`Claude 빈 응답 (stop_reason=${data.stop_reason}, blocks=[${blocks.map((b) => b.type).join(",")}])`);
+  return text;
 }
 
 /* ------------------------------------------------------------------ */

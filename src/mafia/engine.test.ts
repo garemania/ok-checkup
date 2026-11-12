@@ -172,3 +172,20 @@ describe("parseTarget", () => {
     expect(parseTarget("모르겠다", [1, 2], names)).toBeUndefined();
   });
 });
+
+describe("Anthropic provider", () => {
+  const cfg = { ...DEFAULT_SETTINGS, mode: "api" as const, provider: "anthropic" as const, apiKey: "k" };
+  it("gives a generous max_tokens and reports why a reply was empty", async () => {
+    const orig = globalThis.fetch;
+    let sent: { max_tokens?: number } = {};
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      sent = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ content: [{ type: "thinking" }], stop_reason: "max_tokens" }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      await expect(callLLM(cfg, "s", "u", 150)).rejects.toThrow(/stop_reason=max_tokens.*thinking/);
+      expect(sent.max_tokens).toBeGreaterThanOrEqual(1024);
+    } finally { globalThis.fetch = orig; }
+  });
+});
