@@ -7,7 +7,29 @@ import type { GameState, Player, Settings } from "./types";
 /* LLM 호출                                                            */
 /* ------------------------------------------------------------------ */
 
+async function callGemini(settings: Settings, system: string, user: string, maxTokens: number): Promise<string> {
+  const model = settings.geminiModel.trim();
+  const generationConfig: Record<string, unknown> = { maxOutputTokens: maxTokens * 4 };
+  // 2.5 Flash는 기본 '생각' 토큰이 출력 한도를 먹어 응답이 비는 것을 막기 위해 끈다
+  if (/2\.5-flash/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": settings.geminiKey },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      generationConfig,
+    }),
+  });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const text = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
+  if (!text.trim()) throw new Error("Gemini: 빈 응답");
+  return text.trim();
+}
+
 export async function callLLM(settings: Settings, system: string, user: string, maxTokens = 300): Promise<string> {
+  if (settings.provider === "gemini") return callGemini(settings, system, user, maxTokens);
   const base = (settings.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
   const headers: Record<string, string> = {
     "content-type": "application/json",

@@ -23,26 +23,48 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave }: { open:
           <div className="grid grid-cols-2 gap-2">
             {(["mock", "api"] as const).map((m) => (
               <button key={m} onClick={() => setS({ ...s, mode: m })} className={`rounded-lg border p-3 text-left text-sm ${s.mode === m ? "border-primary bg-primary/10" : "border-border"}`}>
-                <div className="font-semibold">{m === "mock" ? "오프라인 AI" : "Claude API"}</div>
+                <div className="font-semibold">{m === "mock" ? "오프라인 AI" : "Claude / Gemini API"}</div>
                 <div className="text-xs text-muted-foreground">{m === "mock" ? "키 없이 테스트용 규칙 기반 AI" : "각 캐릭터가 LLM으로 발언/투표"}</div>
               </button>
             ))}
           </div>
           {api && (
             <>
-              <div className="space-y-1.5">
-                <Label>API Key</Label>
-                <Input type="password" value={s.apiKey} placeholder="sk-ant-..." onChange={(e) => setS({ ...s, apiKey: e.target.value })} />
-                <p className="text-xs text-muted-foreground">브라우저(localStorage)에 저장되어 직접 호출됩니다. 배포 시에는 아래 Base URL을 자체 프록시로 바꿔 키를 서버에 두세요.</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(["anthropic", "gemini"] as const).map((v) => (
+                  <button key={v} onClick={() => setS({ ...s, provider: v })} className={`rounded-lg border p-2 text-sm font-medium ${s.provider === v ? "border-primary bg-primary/10" : "border-border"}`}>
+                    {v === "anthropic" ? "Claude (Anthropic)" : "Gemini (Google)"}
+                  </button>
+                ))}
               </div>
-              <div className="space-y-1.5">
-                <Label>Base URL</Label>
-                <Input value={s.baseUrl} onChange={(e) => setS({ ...s, baseUrl: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>모델</Label>
-                <Input value={s.model} onChange={(e) => setS({ ...s, model: e.target.value })} />
-              </div>
+              {s.provider === "anthropic" ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Claude API Key</Label>
+                    <Input type="password" value={s.apiKey} placeholder="sk-ant-..." onChange={(e) => setS({ ...s, apiKey: e.target.value })} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Base URL</Label>
+                    <Input value={s.baseUrl} onChange={(e) => setS({ ...s, baseUrl: e.target.value })} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>모델</Label>
+                    <Input value={s.model} onChange={(e) => setS({ ...s, model: e.target.value })} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Gemini API Key</Label>
+                    <Input type="password" value={s.geminiKey} placeholder="AIza..." onChange={(e) => setS({ ...s, geminiKey: e.target.value })} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>모델</Label>
+                    <Input value={s.geminiModel} onChange={(e) => setS({ ...s, geminiModel: e.target.value })} />
+                  </div>
+                </>
+              )}
+              <p className="text-xs text-muted-foreground">키는 이 기기의 브라우저(localStorage)에만 저장되고 선택한 API로 직접 전송됩니다. 공용 기기에서는 쓰지 마세요.</p>
             </>
           )}
         </div>

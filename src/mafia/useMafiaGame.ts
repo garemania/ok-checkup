@@ -7,6 +7,9 @@ import type { GameState, Settings } from "./types";
 const SETTINGS_KEY = "mafia-settings";
 export const DEFAULT_SETTINGS: Settings = {
   mode: "mock",
+  provider: "anthropic",
+  geminiKey: "",
+  geminiModel: "gemini-2.5-flash",
   apiKey: "",
   baseUrl: "https://api.anthropic.com",
   model: "claude-haiku-5-5",

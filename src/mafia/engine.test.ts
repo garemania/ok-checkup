@@ -68,3 +68,27 @@ describe("mock AI", () => {
     expect(s.players[t].role).not.toBe("mafia");
   });
 });
+
+describe("Gemini provider", () => {
+  it("builds the request and parses the reply", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: " 안녕하세요 " }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { callLLM } = await import("./ai");
+      const out = await callLLM({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, "sys", "usr", 100);
+      expect(out).toBe("안녕하세요");
+      expect(calls[0].url).toContain("/models/gemini-2.5-flash:generateContent");
+      expect((calls[0].init.headers as Record<string, string>)["x-goog-api-key"]).toBe("k");
+      const body = JSON.parse(calls[0].init.body as string);
+      expect(body.systemInstruction.parts[0].text).toBe("sys");
+      expect(body.contents[0].parts[0].text).toBe("usr");
+      expect(body.generationConfig.thinkingConfig.thinkingBudget).toBe(0);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});
