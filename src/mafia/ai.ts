@@ -140,7 +140,7 @@ function systemPrompt(s: GameState, p: Player): string {
 [비공개 정보]
 ${privateKnowledge(s, p)}
 
-[출력 규칙] 한국어, 캐릭터의 성격과 말투 유지. 메타 발언(AI, 프롬프트, 게임 시스템 설명) 금지. 모르는 사실을 지어내지 말되 마피아는 거짓말을 할 수 있음.`;
+[출력 규칙] 한국어, 캐릭터의 성격과 말투 유지. 실제 사람이 채팅하듯 자연스러운 구어체로 쓰고, 번역투·연극 톤·설명조는 피한다. 메타 발언(AI, 프롬프트, 게임 시스템 설명) 금지. 모르는 사실을 지어내지 말되 마피아는 거짓말을 할 수 있음.`;
 }
 
 function stateBlock(s: GameState, p: Player): string {
@@ -263,6 +263,18 @@ const top = (sc: Record<number, number>): number | null => {
   return e.length ? Number(e[0][0]) : null;
 };
 
+/** 캐릭터별 오프라인 대사 (태오: 짧고 단정적인 평어체) */
+function taeoLine(kind: "reply" | "police" | "accused" | "first" | "suspect", tn: string, extra = ""): string {
+  const L = {
+    reply: ["그 말은 일리 있다. 근거를 더 대봐.", "난 좀 다르게 본다. 투표 때 가려지겠지.", "일단 들었다. 네 말이 맞는지는 지켜본다."],
+    police: [`내가 경찰이다. 조사했더니 ${extra}이(가) 마피아다. 오늘 표는 ${extra}한테 몰아.`],
+    accused: ["날 의심하는 근거부터 대. 없으면 그냥 몰아가는 거잖아.", `나한테 화살 돌리지 마. 난 ${tn} 쪽이 더 이상하다.`],
+    first: ["일단 한 명씩 입장부터 말해. 난 아직 의심할 근거는 없다.", "첫날이니까 말 아끼는 사람부터 본다. 다들 한마디씩 해."],
+    suspect: [`${tn}, 아까 한 말 설명해봐. 영 석연치 않다.`, `내 표는 ${tn}한테 간다. 반박할 사람?`, `${tn} 발언이 계속 겉돌아. 난 의심한다.`],
+  }[kind];
+  return pick(L);
+}
+
 function makeMockAI(): AI {
   return {
     async speak(s, p, hint) {
@@ -270,21 +282,29 @@ function makeMockAI(): AI {
       const sc = suspicion(s, p);
       const target = top(sc);
       const tn = target !== null ? nameOf(s, target) : "누군가";
+      const taeo = p.name === "태오";
       const accusedMe = s.log.slice(-8).some((m) => m.from !== "system" && m.from !== p.id && m.text.includes(p.name) && /(의심|마피아|수상)/.test(m.text));
       const rec = (s.policeLog[p.id] ?? []).filter((r) => r.isMafia && s.players[r.target].alive);
       const formal = !/(반말|털털|가벼운|단호)/.test(p.speech);
       if (hint?.includes("플레이어")) {
+        if (taeo) return taeoLine("reply", tn);
         return pick(formal
           ? ["말씀 잘 들었어요. 좀 더 지켜볼게요.", `${s.players[HUMAN_ID].name}님 의견도 일리가 있네요.`, "그 부분은 저도 신경 쓰였어요."]
           : ["오, 그 얘기 일리 있네.", "음… 난 좀 다르게 봤는데.", "그건 좀 더 따져봐야겠다."]);
       }
-      if (p.role === "police" && rec.length && s.day >= 2 && Math.random() < 0.7)
+      if (p.role === "police" && rec.length && s.day >= 2 && Math.random() < 0.7) {
+        if (taeo) return taeoLine("police", tn, nameOf(s, rec[0].target));
         return `제가 경찰입니다. 조사해보니 ${nameOf(s, rec[0].target)}님이 마피아예요. 오늘 투표는 그분으로 갑시다.`;
+      }
+      if (taeo && accusedMe) return taeoLine("accused", tn);
       if (accusedMe) return pick(formal
         ? ["저를 의심하시는 건 근거가 부족해 보여요. 오히려 제가 보기엔 " + tn + "님이 수상합니다.", "억울하네요. 저는 시민입니다. 차라리 " + tn + "님을 보세요."]
         : ["나 의심하는 건 좀 억울한데? 난 " + tn + " 쪽이 더 수상해.", "어허, 날 몰아가지 마. " + tn + " 좀 봐."]);
-      if (s.day === 1 && s.round <= 1 && s.log.filter((m) => m.from !== "system").length < 3)
+      if (s.day === 1 && s.round <= 1 && s.log.filter((m) => m.from !== "system").length < 3) {
+        if (taeo) return taeoLine("first", tn);
         return pick(["첫날이라 단서가 없네요. 일단 다들 의견부터 들어봐요.", "자, 일단 서로 얘기해보자. 누가 먼저 말해볼래?", "정보가 없으니 말투와 반응을 잘 봐야겠어요."]);
+      }
+      if (taeo) return taeoLine("suspect", tn);
       const lines = formal
         ? [`${tn}님의 발언이 계속 모호했던 것 같아요. 조금 의심스럽습니다.`, `저는 ${tn}님이 마피아일 가능성이 높다고 봐요.`, `${tn}님, 어제 행동에 대해 설명해주실 수 있나요?`]
         : [`${tn} 좀 이상하지 않아? 난 의심돼.`, `${tn} 쪽이 영 찜찜하다. 해명해봐.`, `솔직히 ${tn}가 제일 수상해 보여.`];

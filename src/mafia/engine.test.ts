@@ -141,3 +141,15 @@ describe("API resilience", () => {
     } finally { globalThis.fetch = orig; }
   });
 });
+
+describe("태오 mock speech", () => {
+  it("uses plain, short 반말 (no 존댓말)", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    const taeo = s.players.find((p) => p.name === "태오")!;
+    for (let i = 0; i < 6; i++) {
+      const t = await ai.speak(s, taeo);
+      expect(t).not.toMatch(/(요|습니다|니다)[.!?~]*$/);
+    }
+  }, 20000);
+});
