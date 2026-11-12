@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
-import { ROLE_EMOJI } from "../types";
+import { ROLE_LABEL } from "../types";
+import { RoleIcon } from "./RoleIcon";
 import type { Emotion, Player } from "../types";
 import { FaceArt } from "./FaceArt";
 
@@ -39,7 +40,7 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
         {unread && <span className="absolute -right-0.5 top-0 h-3.5 w-3.5 rounded-full border-2 border-background bg-destructive" />}
         {mark && (
           <span className={cn("absolute -bottom-1 -left-1 rounded-full px-1 text-[10px] font-bold", mark === "mafia" ? "bg-destructive text-destructive-foreground" : "bg-success text-background")}>
-            {mark === "mafia" ? "🚨" : "✔"}
+            {mark === "mafia" ? "마피아" : "시민"}
           </span>
         )}
         {voteCount ? (
@@ -51,8 +52,8 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
         <span className={cn(!p.alive && "line-through text-muted-foreground")}>{p.name}</span>
       </div>
       <div className="h-4 text-[11px] text-muted-foreground">
-        {showRole ? `${ROLE_EMOJI[p.role]}` : p.alive ? "생존" : "사망"}
-        {votedByMe && " 🗳"}
+        {showRole ? <span className="inline-flex items-center gap-0.5"><RoleIcon role={p.role} className="h-3 w-3" />{ROLE_LABEL[p.role]}</span> : p.alive ? "생존" : "사망"}
+        {votedByMe && " (투표)"}
       </div>
     </button>
   );

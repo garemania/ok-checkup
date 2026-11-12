@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI } from "./ai";
-import { HUMAN_ID, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
-import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, nameOf, tallyVotes, wasPhrase } from "./engine";
+import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
+import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
-import type { Emotion, GameState, Settings } from "./types";
+import type { Emotion, GameState, Player, Role, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +25,10 @@ export function loadSettings(): Settings {
   }
 }
 
+export type DayAction =
+  | { kind: "suspect" | "trust" | "ask"; target: number }
+  | { kind: "claim"; role: Role };
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function useMafiaGame(onError: (msg: string) => void) {
@@ -45,6 +49,20 @@ export function useMafiaGame(onError: (msg: string) => void) {
       nextResolver.current = resolve;
       setWaiting(true);
     });
+  // 재판 중 사용자의 변론/찬반 입력을 기다리는 장치
+  const [awaitingHuman, setAwaitingHuman] = useState(false);
+  const humanResolver = useRef<((v: unknown) => void) | null>(null);
+  const waitHuman = <T,>() =>
+    new Promise<T>((resolve) => {
+      humanResolver.current = resolve as (v: unknown) => void;
+      setAwaitingHuman(true);
+    });
+  const resolveHuman = (v: unknown) => {
+    const r = humanResolver.current;
+    humanResolver.current = null;
+    setAwaitingHuman(false);
+    r?.(v);
+  };
   const advance = useCallback(() => {
     const r = nextResolver.current;
     nextResolver.current = null;
@@ -74,18 +92,20 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const startGame = () => {
     runId.current++;
     advance();
+    resolveHuman(null);
     ref.current = createGame(settings.nickname);
     setState(ref.current);
     setBusy(false);
     setSpeaking(null);
     setTyping(null);
     setUnread({});
-    commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다.", "night"));
+    commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다. 첫 밤에는 살해가 없습니다.", "night"));
   };
 
   const quit = () => {
     runId.current++;
     advance();
+    resolveHuman(null);
     ref.current = null;
     setState(null);
     setBusy(false);
@@ -99,7 +119,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setBusy(true);
     const engine = ai();
     const players = s0.players;
-    const hum = players[HUMAN_ID];
+    const firstNight = s0.day === 1; // 첫 밤에는 습격/보호가 없고 경찰 조사만 한다
 
     const decide = async (role: "mafia" | "doctor" | "police", kind: "kill" | "protect" | "investigate") => {
       const actors = players.filter((p) => p.role === role && p.alive);
@@ -111,32 +131,24 @@ export function useMafiaGame(onError: (msg: string) => void) {
       return { actor: a.id, target: await engine.nightTarget(s0, a, kind) };
     };
 
-    const [k, d, p] = await Promise.all([decide("mafia", "kill"), decide("doctor", "protect"), decide("police", "investigate")]);
+    const [k, d, p] = await Promise.all([
+      firstNight ? null : decide("mafia", "kill"),
+      firstNight ? null : decide("doctor", "protect"),
+      decide("police", "investigate"),
+    ]);
     if (!alivePhaseGuard(id)) return;
     await sleep(600);
 
-    let s = ref.current!;
-    if (p) {
-      const target = s.players[p.target];
-      const inv = { target: p.target, isMafia: target.role === "mafia", day: s.day };
-      s = { ...s, policeLog: { ...s.policeLog, [p.actor]: [...(s.policeLog[p.actor] ?? []), inv] } };
-    }
-    let result: string;
-    const victim = k ? k.target : null;
-    if (victim !== null && d && d.target === victim) {
-      result = "밤사이 마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다.";
-    } else if (victim !== null) {
-      s = kill(s, victim, false);
-      result = `밤사이 ${nameOf(s, victim)}님이 마피아에게 살해당했습니다.`;
-    } else {
-      result = "평화로운 밤이 지나갔습니다.";
-    }
-    ref.current = s;
-    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {} }));
-    commit((x) => addMsg(x, "system", `☀️ ${x.day}일차 낮이 밝았습니다. ${result}`, "day"));
+    const { state: after, result } = resolveNight(ref.current!, {
+      kill: k ? k.target : null,
+      protect: d ? d.target : null,
+      investigate: p ? { actor: p.actor, target: p.target } : null,
+    });
+    ref.current = after;
+    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0 }));
+    commit((x) => addMsg(x, "system", `${x.day}일차 낮이 밝았습니다. ${result}`, "day"));
     commit(finishIfWon);
     setBusy(false);
-    void hum;
   };
 
   // 사망한 플레이어는 밤이 자동 진행
@@ -176,31 +188,85 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setBusy(false);
   };
 
+  /** 지정한 캐릭터들이 한 줄씩 말한다 (마지막 줄 전까지는 "다음"을 기다린다). 중단되면 false */
+  const respond = async (id: number, items: { player: Player; hint: string }[]): Promise<boolean> => {
+    const engine = ai();
+    for (let i = 0; i < items.length; i++) {
+      const { player, hint } = items[i];
+      if (!alivePhaseGuard(id)) return false;
+      setSpeaking(player.id);
+      const said = await engine.speak(ref.current!, ref.current!.players[player.id], hint);
+      if (!alivePhaseGuard(id)) return false;
+      setSpeaking(null);
+      commit((x) => addMsg(x, player.id, said.text, undefined, said.emotion));
+      if (i < items.length - 1) {
+        await waitNext();
+        if (!alivePhaseGuard(id)) return false;
+      }
+    }
+    return true;
+  };
+
   const sendPublic = async (text: string) => {
     const s0 = ref.current;
     if (!s0 || busy || !text.trim() || !s0.players[HUMAN_ID].alive || s0.phase !== "day") return;
     const id = runId.current;
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
     setBusy(true);
-    const engine = ai();
     const cur = ref.current!;
+    const me0 = cur.players[HUMAN_ID].name;
     const mentioned = aliveAI(cur).filter((p) => text.includes(p.name));
     const others = aliveAI(cur).filter((p) => !mentioned.includes(p)).sort(() => Math.random() - 0.5);
     const responders = [...mentioned, ...others].slice(0, Math.max(2, mentioned.length));
-    for (let i = 0; i < responders.length; i++) {
-      const p = responders[i];
-      if (!alivePhaseGuard(id)) return;
-      setSpeaking(p.id);
-      const reply = await engine.speak(ref.current!, ref.current!.players[p.id],
-        `플레이어(${cur.players[HUMAN_ID].name})가 방금 발언했습니다. ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`);
-      if (!alivePhaseGuard(id)) return;
-      setSpeaking(null);
-      commit((x) => addMsg(x, p.id, reply.text, undefined, reply.emotion));
-      if (i < responders.length - 1) {
-        await waitNext();
-        if (!alivePhaseGuard(id)) return;
+    const ok = await respond(
+      id,
+      responders.map((p) => ({
+        player: p,
+        hint: `플레이어(${me0})가 방금 발언했습니다. ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
+      })),
+    );
+    if (!ok) return;
+    setSpeaking(null);
+    setBusy(false);
+  };
+
+  /* ---------------- 낮 행동 (지목 / 옹호 / 추궁 / 직업 주장) ---------------- */
+  const doAction = async (a: DayAction) => {
+    const s0 = ref.current;
+    if (!s0 || busy || s0.phase !== "day" || !s0.players[HUMAN_ID].alive || s0.actionsUsed >= MAX_ACTIONS_PER_DAY) return;
+    const id = runId.current;
+    const me0 = s0.players[HUMAN_ID].name;
+    const shuffled = (excl: number[]) => aliveAI(s0).filter((p) => !excl.includes(p.id)).sort(() => Math.random() - 0.5);
+    let text: string;
+    let emotion: Emotion;
+    let items: { player: Player; hint: string }[];
+    if (a.kind === "claim") {
+      const label = ROLE_LABEL[a.role];
+      text = `저는 ${label}입니다.`;
+      emotion = "neutral";
+      items = shuffled([]).slice(0, 2).map((p) => ({ player: p, hint: `[주장] ${me0}가 자신이 ${label}${hasBatchim(label) ? "이" : ""}라고 공개적으로 주장했습니다. 믿는지 의심하는지 반응하세요.` }));
+    } else {
+      const t = s0.players[a.target];
+      const rest = shuffled([t.id]);
+      if (a.kind === "suspect") {
+        text = `${t.name}님이 수상합니다. 이번 투표에서 ${t.name}님을 의심합니다.`;
+        emotion = "suspicious";
+        items = [{ player: t, hint: `[지목] ${me0}가 당신을 마피아로 공개 지목했습니다. 반박하거나 대응하세요.` }];
+        if (rest[0]) items.push({ player: rest[0], hint: `플레이어(${me0})가 ${t.name}님을 의심한다고 공개적으로 지목했습니다. 당신의 생각을 말하세요.` });
+      } else if (a.kind === "trust") {
+        text = `${t.name}님은 믿어도 된다고 생각합니다.`;
+        emotion = "happy";
+        items = [{ player: t, hint: `[옹호] ${me0}가 당신을 믿는다고 공개적으로 말했습니다. 짧게 반응하세요.` }];
+      } else {
+        text = `${t.name}님, 어젯밤에 무엇을 하셨는지 말해 주세요.`;
+        emotion = "suspicious";
+        items = [{ player: t, hint: `[질문] ${me0}가 당신에게 직접 질문했습니다: "어젯밤에 무엇을 하셨나요?" 당신의 직업과 전략에 맞게 답하세요.` }];
       }
     }
+    commit((x) => ({ ...addMsg(x, HUMAN_ID, text, undefined, emotion), actionsUsed: x.actionsUsed + 1 }));
+    setBusy(true);
+    const ok = await respond(id, items);
+    if (!ok) return;
     setSpeaking(null);
     setBusy(false);
   };
@@ -209,7 +275,71 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const startVote = () => {
     const s = ref.current;
     if (!s || busy || s.phase !== "day") return;
-    commit((x) => addMsg({ ...x, phase: "vote", votes: {} }, "system", "🗳 투표 시간입니다. 처형할 사람을 선택하세요.", "vote"));
+    commit((x) => addMsg({ ...x, phase: "vote", votes: {} }, "system", "투표 시간입니다. 가장 의심되는 사람을 선택하세요.", "vote"));
+  };
+
+  const goNight = () =>
+    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
+
+  /** 최후의 변론 -> 찬반 투표 -> (처형 시) 유언. 중단되면 false */
+  const runTrial = async (id: number, accusedId: number): Promise<boolean> => {
+    const engine = ai();
+    const nm = nameOf(ref.current!, accusedId);
+    commit((x) => addMsg({ ...x, phase: "trial", accused: accusedId, trialStage: "defense" }, "system", `${nm}님이 최다 득표로 지목되었습니다. 최후의 변론을 시작합니다.`, "trial"));
+    await waitNext();
+    if (!alivePhaseGuard(id)) return false;
+
+    // 최후의 변론
+    if (ref.current!.players[accusedId].isHuman) {
+      const text = await waitHuman<string | null>();
+      if (!alivePhaseGuard(id)) return false;
+      if (text && text.trim()) commit((x) => addMsg(x, HUMAN_ID, text.trim(), "trial", "sad"));
+      else commit((x) => addMsg(x, "system", "변론 없이 넘어갑니다.", "trial"));
+    } else {
+      setSpeaking(accusedId);
+      const said = await engine.speak(ref.current!, ref.current!.players[accusedId], "[재판] 당신은 최다 득표로 처형 위기에 놓였습니다. 최후의 변론을 하세요. 억울함을 호소하거나 다른 사람을 지목해도 됩니다.");
+      if (!alivePhaseGuard(id)) return false;
+      setSpeaking(null);
+      commit((x) => addMsg(x, accusedId, said.text, "trial", said.emotion));
+    }
+    await waitNext();
+    if (!alivePhaseGuard(id)) return false;
+
+    // 찬반 투표
+    commit((x) => addMsg({ ...x, trialStage: "verdict" }, "system", `찬반 투표를 시작합니다. 찬성이 반대보다 많으면 ${nm}님이 처형됩니다.`, "trial"));
+    const voters = alive(ref.current!).filter((p) => p.id !== accusedId);
+    const humanVotes = voters.some((p) => p.isHuman);
+    const humanPromise = humanVotes ? waitHuman<boolean | null>() : Promise.resolve<boolean | null>(null);
+    const aiVotes = await Promise.all(
+      voters.filter((p) => !p.isHuman).map(async (p) => [p.id, await engine.verdict(ref.current!, p, accusedId)] as const),
+    );
+    const hv = await humanPromise;
+    if (!alivePhaseGuard(id)) return false;
+    const votes: Record<number, boolean> = Object.fromEntries(aiVotes);
+    if (humanVotes) votes[HUMAN_ID] = hv === true;
+    const { yes, no, execute } = tallyVerdict(votes);
+    const list = voters.map((p) => `${p.name}: ${votes[p.id] ? "찬성" : "반대"}`).join("\n");
+    commit((x) => addMsg(x, "system", `찬반 투표 결과\n${list}\n\n찬성 ${yes} / 반대 ${no}`, "trial"));
+    await waitNext();
+    if (!alivePhaseGuard(id)) return false;
+
+    if (execute) {
+      commit((x) => kill(x, accusedId, true));
+      commit((x) => addMsg(x, "system", `${nm}님이 처형되었습니다. 정체는 ${wasPhrase(ROLE_LABEL[x.players[accusedId].role])}.`, "trial"));
+      if (!ref.current!.players[accusedId].isHuman) {
+        await waitNext();
+        if (!alivePhaseGuard(id)) return false;
+        setSpeaking(accusedId);
+        const last = await engine.speak(ref.current!, ref.current!.players[accusedId], "[재판] 당신은 처형되었습니다. 남기는 마지막 한마디(유언)를 하세요.");
+        if (!alivePhaseGuard(id)) return false;
+        setSpeaking(null);
+        commit((x) => addMsg(x, accusedId, last.text, "trial", last.emotion === "neutral" ? "sad" : last.emotion));
+      }
+    } else {
+      commit((x) => addMsg(x, "system", `반대가 많아 ${nm}님은 처형되지 않았습니다.`, "trial"));
+    }
+    commit(finishIfWon);
+    return true;
   };
 
   const runVote = async (humanTarget: number | null) => {
@@ -225,23 +355,26 @@ export function useMafiaGame(onError: (msg: string) => void) {
     if (!alivePhaseGuard(id)) return;
     const votes: Record<number, number | null> = Object.fromEntries(results);
     commit((x) => ({ ...x, votes }));
-    const summary = results.map(([voter, t]) => `${nameOf(ref.current!, voter)} → ${t === null ? "기권" : nameOf(ref.current!, t)}`).join("\n");
-    commit((x) => addMsg(x, "system", `🗳 투표 결과\n${summary}`, "vote"));
+    const { executed, counts } = tallyVotes(ref.current!, votes);
+    const lines = results.map(([voter, t]) => `${nameOf(ref.current!, voter)} → ${t === null ? "기권" : nameOf(ref.current!, t)}`).join("\n");
+    const tally = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${nameOf(ref.current!, Number(t))} ${n}표`).join(" / ");
+    commit((x) => addMsg(x, "system", `투표 결과\n${lines}${tally ? `\n\n${tally}` : ""}`, "vote"));
     await waitNext();
     if (!alivePhaseGuard(id)) return;
-    const { executed } = tallyVotes(ref.current!, votes);
+
     if (executed === null) {
-      commit((x) => addMsg(x, "system", "동점이거나 표가 없어 아무도 처형되지 않았습니다.", "vote"));
-    } else {
-      commit((x) => kill(x, executed, true));
-      commit((x) => addMsg(x, "system", `⚖️ ${nameOf(x, executed)}님이 처형되었습니다. 정체는 ${wasPhrase(ROLE_LABEL[x.players[executed].role])}.`, "vote"));
-    }
-    commit(finishIfWon);
-    if (ref.current!.phase !== "gameover") {
+      commit((x) => addMsg(x, "system", "동점이거나 표가 없어 아무도 지목되지 않았습니다.", "vote"));
       await waitNext();
       if (!alivePhaseGuard(id)) return;
-      commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {} }, "system", `🌙 ${x.day + 1}일차 밤이 되었습니다.`, "night"));
+    } else {
+      const ok = await runTrial(id, executed);
+      if (!ok) return;
+      if (ref.current!.phase !== "gameover") {
+        await waitNext();
+        if (!alivePhaseGuard(id)) return;
+      }
     }
+    if (ref.current!.phase !== "gameover") goNight();
     setBusy(false);
   };
 
@@ -286,7 +419,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   return {
-    waiting, advance, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
+    waiting, advance, awaitingHuman, submitDefense: (t: string | null) => resolveHuman(t), submitVerdict: (v: boolean) => resolveHuman(v), doAction, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
     startGame, quit, runNight, runRound, sendPublic, startVote, runVote,
     sendWhisper, whisperBlockReason, ...helpers,
   };

@@ -7,6 +7,7 @@ import { TopBar } from "@/mafia/components/TopBar";
 import { InkDefs } from "@/mafia/components/FaceArt";
 import { SpeakerStage } from "@/mafia/components/SpeakerStage";
 import { StartScreen } from "@/mafia/components/StartScreen";
+import { PhaseBanner } from "@/mafia/components/PhaseBanner";
 import { LogSheet } from "@/mafia/components/LogSheet";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
 import { WhisperSheet } from "@/mafia/components/WhisperSheet";
@@ -15,7 +16,8 @@ import { InfoDialog } from "@/mafia/components/InfoDialog";
 import { useMafiaGame } from "@/mafia/useMafiaGame";
 import { HUMAN_ID } from "@/mafia/data";
 import { emotionOf, tallyVotes } from "@/mafia/engine";
-import { ROLE_EMOJI, ROLE_LABEL } from "@/mafia/types";
+import { ROLE_LABEL } from "@/mafia/types";
+import { RoleIcon } from "@/mafia/components/RoleIcon";
 
 const Mafia = () => {
   const g = useMafiaGame((m) => toast.error(m, { duration: 15000 }));
@@ -90,17 +92,21 @@ const Mafia = () => {
 
         <footer className="rounded-2xl border border-border bg-card">
           {target !== null && (state.phase === "night" || state.phase === "vote") && (
-            <div className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">선택됨: {state.players[target].emoji} {state.players[target].name}</div>
+            <div className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">선택됨: {state.players[target].name}</div>
           )}
           <ActionPanel
             state={state}
             busy={g.busy}
+            awaitingHuman={g.awaitingHuman}
             target={target}
             setTarget={setTarget}
             onNight={g.runNight}
             onRound={g.runRound}
             onSend={g.sendPublic}
+            onAction={g.doAction}
             onStartVote={g.startVote}
+            onDefense={g.submitDefense}
+            onVerdict={g.submitVerdict}
             onVote={g.runVote}
             onRestart={g.quit}
           />
@@ -118,13 +124,14 @@ const Mafia = () => {
         pickLabel={pickLabel}
       />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
+      <PhaseBanner phase={state.phase} day={state.day} />
       <LogSheet state={state} open={logOpen} onOpenChange={setLogOpen} />
       <InfoDialog state={state} open={infoOpen} onOpenChange={setInfoOpen} />
 
       <Dialog open={state.phase === "gameover"}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{state.winner === "citizen" ? "🎉 시민 승리!" : "😈 마피아 승리!"}</DialogTitle>
+            <DialogTitle>{state.winner === "citizen" ? "시민 승리" : "마피아 승리"}</DialogTitle>
             <DialogDescription>
               {(state.winner === "citizen") === (me.role !== "mafia") ? "당신의 팀이 이겼습니다." : "당신의 팀이 패배했습니다."}
             </DialogDescription>
@@ -132,8 +139,8 @@ const Mafia = () => {
           <ul className="space-y-1 text-sm">
             {state.players.map((p) => (
               <li key={p.id} className="flex justify-between">
-                <span>{p.emoji} {p.name}{p.isHuman && " (나)"}{!p.alive && " ✕"}</span>
-                <span>{ROLE_EMOJI[p.role]} {ROLE_LABEL[p.role]}</span>
+                <span>{p.name}{p.isHuman && " (나)"}{!p.alive && " (사망)"}</span>
+                <span className="inline-flex items-center gap-1"><RoleIcon role={p.role} className="h-3.5 w-3.5" />{ROLE_LABEL[p.role]}</span>
               </li>
             ))}
           </ul>

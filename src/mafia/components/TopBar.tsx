@@ -1,6 +1,7 @@
 import { Moon, ScrollText, Settings, Sun, Vote, Skull, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ROLE_EMOJI, ROLE_LABEL } from "../types";
+import { ROLE_LABEL } from "../types";
+import { RoleIcon } from "./RoleIcon";
 import type { GameState } from "../types";
 import { HUMAN_ID } from "../data";
 
@@ -9,6 +10,7 @@ const PHASE = {
   night: { icon: Moon, label: "밤" },
   day: { icon: Sun, label: "낮 · 토론" },
   vote: { icon: Vote, label: "투표" },
+  trial: { icon: Vote, label: "재판" },
   gameover: { icon: Skull, label: "게임 종료" },
 } as const;
 
@@ -35,7 +37,7 @@ export function TopBar({ state, onSettings, onInfo, onLog }: { state: GameState;
       </div>
       <div className="flex items-center gap-1.5">
         <button onClick={onInfo} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-border bg-secondary px-3 py-1 text-sm hover:bg-secondary/70">
-          <span>{ROLE_EMOJI[me.role]}</span>
+          <RoleIcon role={me.role} />
           <span className="font-medium">{ROLE_LABEL[me.role]}</span>
           <Info className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
