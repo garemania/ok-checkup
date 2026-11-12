@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Face } from "@/mafia/components/Face";
 import { TopBar } from "@/mafia/components/TopBar";
 import { InkDefs } from "@/mafia/components/FaceArt";
 import { SpeakerStage } from "@/mafia/components/SpeakerStage";
+import { StartScreen } from "@/mafia/components/StartScreen";
 import { LogSheet } from "@/mafia/components/LogSheet";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
 import { WhisperSheet } from "@/mafia/components/WhisperSheet";
@@ -33,20 +33,14 @@ const Mafia = () => {
   useEffect(() => { if (state && state.log.length === 1) setInfoOpen(true); }, [state?.log.length === 1]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) {
+    const aiLabel = g.settings.mode === "api"
+      ? `AI: ${g.settings.provider === "gemini" ? `Gemini (${g.settings.geminiModel})` : `Claude (${g.settings.model})`}`
+      : "AI: 오프라인 (설정에서 API 연결 가능)";
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-        <div className="text-6xl">🌙🔪</div>
-        <div>
-          <h1 className="text-3xl font-bold">마피아 게임</h1>
-          <p className="mt-2 text-muted-foreground">나 + AI 캐릭터 7명 · 마피아 2 / 경찰 1 / 의사 1 / 시민 4<br />캐릭터를 눌러 1:1 비밀 대화를 걸 수 있습니다.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button size="lg" onClick={g.startGame}>게임 시작</Button>
-          <Button size="lg" variant="secondary" onClick={() => setSettingsOpen(true)}><Settings className="mr-1 h-4 w-4" />설정</Button>
-        </div>
-        <p className="text-xs text-muted-foreground">현재 AI: {g.settings.mode === "api" ? (g.settings.provider === "gemini" ? `Gemini (${g.settings.geminiModel})` : `Claude API (${g.settings.model})`) : "오프라인 AI (설정에서 API 연결 가능)"}</p>
+      <>
+        <StartScreen onStart={g.startGame} onSettings={() => setSettingsOpen(true)} aiLabel={aiLabel} />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
-      </div>
+      </>
     );
   }
 
