@@ -1,4 +1,4 @@
-import { Moon, Settings, Sun, Vote, Skull, Info } from "lucide-react";
+import { Moon, ScrollText, Settings, Sun, Vote, Skull, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ROLE_EMOJI, ROLE_LABEL } from "../types";
 import type { GameState } from "../types";
@@ -12,7 +12,7 @@ const PHASE = {
   gameover: { icon: Skull, label: "게임 종료" },
 } as const;
 
-export function TopBar({ state, onSettings, onInfo }: { state: GameState; onSettings: () => void; onInfo: () => void }) {
+export function TopBar({ state, onSettings, onInfo, onLog }: { state: GameState; onSettings: () => void; onInfo: () => void; onLog: () => void }) {
   const ph = PHASE[state.phase];
   const Icon = ph.icon;
   const me = state.players[HUMAN_ID];
@@ -39,6 +39,7 @@ export function TopBar({ state, onSettings, onInfo }: { state: GameState; onSett
           <span className="font-medium">{ROLE_LABEL[me.role]}</span>
           <Info className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
+        <Button variant="ghost" size="icon" onClick={onLog} aria-label="대화 기록"><ScrollText className="h-5 w-5" /></Button>
         <Button variant="ghost" size="icon" onClick={onSettings} aria-label="설정"><Settings className="h-5 w-5" /></Button>
       </div>
     </header>
