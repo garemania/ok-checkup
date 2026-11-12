@@ -102,3 +102,10 @@ export function logToText(s: GameState, limit = 40): string {
     })
     .join("\n");
 }
+
+/** 받침 유무에 따라 "이었습니다"/"였습니다" 선택 */
+export function wasPhrase(word: string): string {
+  const code = word.charCodeAt(word.length - 1);
+  const hasBatchim = code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0;
+  return `${word}${hasBatchim ? "이었" : "였"}습니다`;
+}

@@ -7,6 +7,53 @@ import type { GameState, Player, Settings } from "./types";
 /* LLM 호출                                                            */
 /* ------------------------------------------------------------------ */
 
+class ApiError extends Error {
+  constructor(public status: number, message: string, public retryAfterMs?: number, public daily = false) {
+    super(message);
+  }
+}
+
+const MAX_CONCURRENT = 2; // 투표·밤 행동이 한꺼번에 나가 분당 한도에 걸리는 것을 막는다
+const MAX_RETRIES = 2;
+let active = 0;
+const waiters: (() => void)[] = [];
+
+async function limited<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= MAX_CONCURRENT) await new Promise<void>((r) => waiters.push(r));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiters.shift()?.();
+  }
+}
+
+function parseRetryMs(res: Response, body: string): number | undefined {
+  const h = res.headers.get("retry-after");
+  if (h !== null && !Number.isNaN(Number(h))) return Number(h) * 1000;
+  const m = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  return m ? Number(m[1]) * 1000 : undefined;
+}
+
+async function failFrom(label: string, res: Response): Promise<never> {
+  const body = await res.text();
+  throw new ApiError(res.status, `${label} ${res.status}: ${body.slice(0, 200)}`, parseRetryMs(res, body), /PerDay/i.test(body));
+}
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await limited(fn);
+    } catch (e) {
+      const retryable = e instanceof ApiError && [429, 503, 529].includes(e.status) && !e.daily;
+      if (!retryable || attempt >= MAX_RETRIES) throw e;
+      const wait = Math.min((e as ApiError).retryAfterMs ?? 4000 * 2 ** attempt, 30000);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 async function callGemini(settings: Settings, system: string, user: string, maxTokens: number): Promise<string> {
   const model = settings.geminiModel.trim();
   const generationConfig: Record<string, unknown> = { maxOutputTokens: maxTokens * 4 };
@@ -21,15 +68,20 @@ async function callGemini(settings: Settings, system: string, user: string, maxT
       generationConfig,
     }),
   });
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) await failFrom("Gemini", res);
   const data = await res.json();
   const text = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("");
   if (!text.trim()) throw new Error("Gemini: 빈 응답");
   return text.trim();
 }
 
-export async function callLLM(settings: Settings, system: string, user: string, maxTokens = 300): Promise<string> {
-  if (settings.provider === "gemini") return callGemini(settings, system, user, maxTokens);
+export function callLLM(settings: Settings, system: string, user: string, maxTokens = 300): Promise<string> {
+  return withRetry(() =>
+    settings.provider === "gemini" ? callGemini(settings, system, user, maxTokens) : callAnthropic(settings, system, user, maxTokens),
+  );
+}
+
+async function callAnthropic(settings: Settings, system: string, user: string, maxTokens: number): Promise<string> {
   const base = (settings.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -47,7 +99,7 @@ export async function callLLM(settings: Settings, system: string, user: string, 
       messages: [{ role: "user", content: user }],
     }),
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) await failFrom("API", res);
   const data = await res.json();
   const text = (data.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
   return text.trim();
