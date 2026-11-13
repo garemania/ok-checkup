@@ -1,5 +1,6 @@
 import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BUILD_LABEL } from "../buildInfo";
 import { AI_CHARS, HUMAN_CHAR } from "../data";
 import type { Emotion } from "../types";
 import { FaceArt, InkDefs } from "./FaceArt";
@@ -107,6 +108,7 @@ export function StartScreen({ onStart, onSettings, aiLabel }: Props) {
             <span className="inline-flex skew-x-6 items-center gap-2"><Settings className="h-4 w-4" />설정</span>
           </button>
           <p className="pt-1 text-[11px] tracking-wide text-[#e8e0d0]/50">{aiLabel}</p>
+          <p className="text-[11px] tracking-wide text-[#e8e0d0]/40">{BUILD_LABEL}</p>
         </div>
       </div>
     </div>
