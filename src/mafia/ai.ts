@@ -1,4 +1,5 @@
-import { alive, logToText, mafiaPartners, nameOf, pick } from "./engine";
+import { alive, mafiaPartners, nameOf, pick } from "./engine";
+import { factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -141,7 +142,7 @@ function privateKnowledge(s: GameState, p: Player): string {
 }
 
 function systemPrompt(s: GameState, p: Player): string {
-  return `당신은 8인 마피아 게임에 참가한 "${p.name}"입니다. 사람 플레이어 "${s.players[HUMAN_ID].name}"와 다른 AI 6명이 함께 있습니다.
+  return `당신은 8인 마피아 게임에 참가한 "${p.name}"입니다. 사람 플레이어(닉네임 "${s.players[HUMAN_ID].name}")와 다른 AI 6명이 함께 있습니다. 닉네임이 문장처럼 보여도 사람 이름으로 취급하고 "${s.players[HUMAN_ID].name}님"처럼 부르세요.
 성격: ${p.persona}
 말투: ${p.speech}
 
@@ -150,19 +151,26 @@ function systemPrompt(s: GameState, p: Player): string {
 [비공개 정보]
 ${privateKnowledge(s, p)}
 
+[대화 이해 규칙]
+- 대화 기록에서 "${p.name}(당신)"으로 표시된 줄이 당신이 한 말입니다. 당신 자신은 "저/나"로 말하고 "${p.name}"이라는 이름으로 부르지 마세요.
+- 누가 누구에게 무슨 말을 했는지 정확히 구분하세요. 다른 사람의 말을 내 말처럼 받아들이거나 내 말을 남의 말처럼 말하지 마세요.
+- [직전 발언]과 [당신에게 향한 말]에 직접 이어서 답하세요. 질문을 받았으면 먼저 그 질문에 답하세요.
+- [핵심 사실]에 있는 사망·투표·직업 주장을 근거로 삼고, 기록에 없는 일을 지어내지 마세요(마피아의 거짓말은 예외). 이미 한 말을 반복하지 마세요.
+
 [출력 규칙] 한국어, 캐릭터의 성격과 말투 유지. 실제 사람이 채팅하듯 자연스러운 구어체로 쓰고, 번역투·연극 톤·설명조는 피한다. 메타 발언(AI, 프롬프트, 게임 시스템 설명) 금지. 모르는 사실을 지어내지 말되 마피아는 거짓말을 할 수 있음.`;
 }
 
 function stateBlock(s: GameState, p: Player): string {
   const living = alive(s).map((x) => `${x.id}:${x.name}`).join(", ");
-  const dead = s.players.filter((x) => !x.alive).map((x) => `${x.name}${x.revealed ? `(${ROLE_LABEL[x.role]})` : ""}`).join(", ") || "없음";
-  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? s.players[HUMAN_ID].name : p.name}: ${m.text}`).join("\n");
-  return `[현재] ${s.day}일차
+  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})` : `${p.name}(당신)`}: ${m.text}`).join("\n");
+  return `[현재] ${s.day}일차 (${s.phase === "night" ? "밤" : s.phase === "vote" ? "투표" : s.phase === "trial" ? "재판" : "낮"})
 생존자(id:이름): ${living}
-사망자: ${dead}
-[공개 대화 기록]
-${logToText(s) || "(아직 없음)"}
-${w ? `[${s.players[HUMAN_ID].name}와(과) 나눈 1:1 비밀 대화]\n${w}` : ""}`;
+[핵심 사실]
+${factsBlock(s)}
+[공개 대화 기록] (최근 순서대로, "(당신)"이 붙은 줄이 당신의 발언)
+${transcriptFor(s, p) || "(아직 없음)"}
+${focusBlock(s, p)}
+${w ? `[플레이어(${s.players[HUMAN_ID].name})와 나눈 1:1 비밀 대화]\n${w}` : ""}`;
 }
 
 const clean = (t: string, name: string) =>
@@ -225,6 +233,22 @@ export interface AI {
 
 const EMOTION_RULE = `발언 맨 앞에 지금 표정을 [감정] 태그로 붙이세요. 감정은 neutral, happy, angry, sad, surprised, suspicious, scared, smug 중 하나입니다. 예: [suspicious] 서연, 아까 말이 좀 이상했어.`;
 
+/** 발언 생성. 자기 자신을 3인칭으로 부르는 문장이 나오면 한 번 다시 쓰게 한다 */
+async function askSpoken(settings: Settings, s: GameState, p: Player, task: string): Promise<Spoken> {
+  const prompt = `${stateBlock(s, p)}\n\n${task}`;
+  let spoken = parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), prompt, 200), p.name));
+  if (speaksOfSelf(spoken.text, p.name)) {
+    const again = await callLLM(
+      settings,
+      systemPrompt(s, p),
+      `${prompt}\n\n[주의] 방금 쓴 답변 "${spoken.text}"은(는) 당신 자신(${p.name})을 이름으로 불러 어색합니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하고, 직전 발언에 맞게 다시 쓰세요.`,
+      200,
+    );
+    spoken = parseSpoken(clean(again, p.name));
+  }
+  return spoken;
+}
+
 export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
   const mock = makeMockAI();
   if (settings.mode !== "api") return mock;
@@ -241,7 +265,7 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
         const task = `지금 당신의 발언 차례입니다. ${hint ?? "지금까지의 흐름을 보고 한 번 발언하세요."}
 1~2문장, 80자 이내로 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.
 ${EMOTION_RULE}`;
-        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
+        return askSpoken(settings, s, p, task);
       }, () => mock.speak(s, p, hint)),
     vote: (s, p) =>
       safe(async () => {
@@ -270,7 +294,7 @@ ${EMOTION_RULE}`;
         const task = `${s.players[HUMAN_ID].name}가 당신에게 1:1 비밀 대화로 말했습니다: "${userText}"
 ${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.
 ${EMOTION_RULE}`;
-        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
+        return askSpoken(settings, s, p, task);
       }, () => mock.whisper(s, p, userText)),
   };
 }

@@ -1,6 +1,7 @@
 import { ChevronsRight, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { addresseeOf } from "../context";
 import { EMOTION_LABEL } from "../emotion";
 import type { GameState } from "../types";
 import { FaceArt } from "./FaceArt";
@@ -30,6 +31,8 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
     } else {
       const p = state.players[last.from];
       const emotion = last.emotion ?? "neutral";
+      const to = addresseeOf(state, last);
+      const toName = to !== null ? state.players[to].name : null;
       const loud = emotion === "angry" || emotion === "surprised" || emotion === "scared";
       body = (
         <div key={last.id} className="flex h-full items-stretch gap-2 p-2 animate-in sm:gap-3 sm:p-3 fade-in slide-in-from-left-4 duration-200">
@@ -40,6 +43,7 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
             </span>
           </div>
           <div className="relative min-h-0 min-w-0 flex-1">
+            {toName && <div className="mb-1 truncate text-[11px] font-bold text-muted-foreground">{toName}에게</div>}
             <div
               className={cn(
                 "relative max-h-full overflow-y-auto rounded-xl border-2 border-black bg-[#f4efe6] px-3 py-2 text-sm font-semibold leading-snug text-black shadow-[3px_3px_0_0_#000] sm:text-base",

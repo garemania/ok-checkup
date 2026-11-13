@@ -292,3 +292,77 @@ describe("trial verdict", () => {
     expect(await ai.verdict(s, voter, partner.id)).toBe(false);
   });
 });
+
+describe("conversation context", () => {
+  it("labels the viewer's own lines and the human player", async () => {
+    const { transcriptFor } = await import("./context");
+    let s = createGame("나는시민이다");
+    s = addMsg(s, 1, "안녕하세요");
+    s = addMsg(s, 0, "서연님은 시민이에요");
+    const t = transcriptFor(s, s.players[1]);
+    expect(t).toContain("서연(당신): 안녕하세요");
+    expect(t).toContain("플레이어(나는시민이다): 서연님은 시민이에요");
+  });
+
+  it("detects first-person role claims only", async () => {
+    const { detectClaims } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 2, "제가 경찰입니다. 조사해 보니 지후가 수상해요.");
+    s = addMsg(s, 3, "도윤이 경찰이라고 했지만 믿기 어려워요.");
+    s = addMsg(s, 0, "저는 의사입니다.");
+    const c = detectClaims(s);
+    expect(c[2]).toBe("police");
+    expect(c[0]).toBe("doctor");
+    expect(c[3]).toBeUndefined();
+  });
+
+  it("facts keep deaths, votes and claims after the recent-lines window", async () => {
+    const { factsBlock, transcriptFor } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 2, "제가 경찰입니다.");
+    s = addMsg(s, "system", "투표 결과\n서연 → 민재\n도윤 → 민재\n\n민재 2표", "vote");
+    s = kill(s, 5, true);
+    s = addMsg(s, "system", "민재님이 처형되었습니다. 정체는 시민이었습니다.", "trial");
+    for (let i = 0; i < 60; i++) s = addMsg(s, 1, `잡담 ${i}`);
+    expect(transcriptFor(s, s.players[1])).not.toContain("제가 경찰입니다");
+    const f = factsBlock(s);
+    expect(f).toContain("도윤=경찰 주장");
+    expect(f).toContain("서연→민재");
+    expect(f).toContain("처형되었습니다");
+    const { ROLE_LABEL } = await import("./types");
+    expect(f).toContain(`민재(${ROLE_LABEL[s.players[5].role]} 공개)`);
+  });
+
+  it("finds who is being addressed", async () => {
+    const { addresseeOf } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 1, "태오, 아까 한 말 설명해 봐.");
+    s = addMsg(s, 2, "그건 좀 이상한데요.");
+    expect(addresseeOf(s, s.log[0])).toBe(7);
+    expect(addresseeOf(s, s.log[1])).toBeNull();
+  });
+
+  it("flags third-person self reference but allows self-introduction", async () => {
+    const { speaksOfSelf } = await import("./context");
+    expect(speaksOfSelf("서연이 시민이라는 결과는 들었지만", "서연")).toBe(true);
+    expect(speaksOfSelf("서연님, 말씀해 보세요", "서연")).toBe(true);
+    expect(speaksOfSelf("저 서연은 시민입니다", "서연")).toBe(false);
+    expect(speaksOfSelf("도윤님이 수상해요", "서연")).toBe(false);
+  });
+
+  it("asks again when the model refers to itself in the third person", async () => {
+    const orig = globalThis.fetch;
+    const replies = ["서연이 시민이라는 말은 들었는데요.", "저는 시민이라고 했잖아요. 근거부터 말씀해 주세요."];
+    let n = 0;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: `[suspicious] ${replies[Math.min(n++, 1)]}` }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      const said = await ai.speak(s, s.players[1]);
+      expect(n).toBe(2);
+      expect(said.text).toBe("저는 시민이라고 했잖아요. 근거부터 말씀해 주세요.");
+      expect(said.emotion).toBe("suspicious");
+    } finally { globalThis.fetch = orig; }
+  });
+});
