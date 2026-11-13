@@ -38,6 +38,7 @@ const ACTIONS = [
   { kind: "suspect", label: "의심 지목", needTarget: true },
   { kind: "trust", label: "옹호", needTarget: true },
   { kind: "ask", label: "추궁", needTarget: true },
+  { kind: "report", label: "조사 보고", needTarget: true },
   { kind: "claim", label: "직업 주장", needTarget: false },
 ] as const;
 type ActionKind = (typeof ACTIONS)[number]["kind"];
@@ -48,6 +49,7 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
   const [defense, setDefense] = useState("");
   const [mode, setMode] = useState<ActionKind | null>(null);
   const [claimRole, setClaimRole] = useState<Role | null>(null);
+  const [reportResult, setReportResult] = useState<"clean" | "mafia" | null>(null);
   const me = state.players[HUMAN_ID];
   const living = alive(state);
 
@@ -176,8 +178,9 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
   const actionsLeft = MAX_ACTIONS_PER_DAY - state.actionsUsed;
   const canAct = me.alive && !busy && actionsLeft > 0;
   const needsTarget = mode !== null && ACTIONS.find((a) => a.kind === mode)?.needTarget;
-  const ready = mode === "claim" ? claimRole !== null : target !== null;
-  const cancelMode = () => { setMode(null); setClaimRole(null); setTarget(null); };
+  const ready = mode === "claim" ? claimRole !== null : mode === "report" ? target !== null && reportResult !== null : target !== null;
+  const cancelMode = () => { setMode(null); setClaimRole(null); setReportResult(null); setTarget(null); };
+  const myRecords = me.role === "police" ? (state.policeLog[HUMAN_ID] ?? []) : [];
   return (
     <div className="space-y-2 p-3">
       <div className="space-y-1.5">
@@ -185,13 +188,13 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
           <span>행동 (남은 횟수 {actionsLeft}/{MAX_ACTIONS_PER_DAY})</span>
           {mode && <button className="underline" onClick={cancelMode}>취소</button>}
         </div>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-5 gap-1">
           {ACTIONS.map((a) => (
             <button
               key={a.kind}
               disabled={!canAct}
-              onClick={() => { setMode(mode === a.kind ? null : a.kind); setClaimRole(null); setTarget(null); }}
-              className={cn("rounded-md border px-1 py-1.5 text-xs font-bold transition disabled:opacity-40", mode === a.kind ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary hover:bg-secondary/70")}
+              onClick={() => { setMode(mode === a.kind ? null : a.kind); setClaimRole(null); setReportResult(null); setTarget(null); }}
+              className={cn("rounded-md border px-0.5 py-1.5 text-[11px] font-bold leading-tight transition disabled:opacity-40 sm:text-xs", mode === a.kind ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary hover:bg-secondary/70")}
             >
               {a.label}
             </button>
@@ -214,6 +217,20 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
                 ))}
               </div>
             )}
+            {mode === "report" && (
+              <div className="space-y-1.5">
+                <div className="flex gap-1.5">
+                  {([["clean", "마피아 아님"], ["mafia", "마피아다"]] as const).map(([k, label]) => (
+                    <button key={k} onClick={() => setReportResult(reportResult === k ? null : k)} className={cn("flex-1 rounded-full border px-3 py-1 text-sm", reportResult === k ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary")}>{label}</button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  &quot;저는 경찰이고 조사했더니 ~입니다&quot;라고 공개합니다.
+                  {myRecords.length > 0 && ` 내 조사 기록: ${myRecords.map((r) => `${state.players[r.target].name}=${r.isMafia ? "마피아" : "마피아 아님"}`).join(", ")}`}
+                  {me.role !== "police" && " 경찰이 아니어도 보고할 수 있지만 거짓은 들통날 수 있습니다."}
+                </p>
+              </div>
+            )}
             {mode === "claim" && <p className="text-[11px] text-muted-foreground">진짜 직업이 아니어도 주장할 수 있습니다. 거짓 주장은 들통나면 의심받습니다.</p>}
             <Button
               size="sm"
@@ -221,7 +238,8 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
               disabled={!ready}
               onClick={() => {
                 if (mode === "claim" && claimRole) onAction({ kind: "claim", role: claimRole });
-                else if (mode && mode !== "claim" && target !== null) onAction({ kind: mode, target });
+                else if (mode === "report" && target !== null && reportResult) onAction({ kind: "report", target, result: reportResult });
+                else if (mode && mode !== "claim" && mode !== "report" && target !== null) onAction({ kind: mode, target });
                 cancelMode();
               }}
             >

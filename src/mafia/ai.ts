@@ -1,4 +1,5 @@
-import { alive, logToText, mafiaPartners, nameOf, pick } from "./engine";
+import { alive, mafiaPartners, nameOf, pick } from "./engine";
+import { factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -118,6 +119,26 @@ async function callAnthropic(settings: Settings, system: string, user: string, m
 /* 프롬프트 구성 (각 AI는 자기가 알 수 있는 정보만 받는다)             */
 /* ------------------------------------------------------------------ */
 
+const RULEBOOK = `[게임 규칙 전체]
+1. 구성과 승리: 마피아 2, 경찰 1, 의사 1, 군인 1, 시민 3(총 8명). 마피아가 전멸하면 시민 팀 승리, 마피아 수가 시민 팀 수 이상이면 마피아 승리.
+2. 진행: 1일차 밤(살해 없음, 경찰만 조사) -> 낮(토론과 행동) -> 투표(최다 득표자 지목, 동점이면 무효) -> 최후의 변론 -> 찬반 투표(찬성이 반대보다 많으면 처형, 직업 공개, 유언) -> 밤(마피아 살해, 의사 보호, 경찰 조사) -> 다음 낮.
+3. 직업과 그 한계:
+ - 마피아: 동료를 알고 있다. 밤마다 시민 팀 1명을 살해한다. 낮에는 시민인 척 연기하며 경찰/의사를 사칭해도 된다.
+ - 경찰: 밤마다 1명을 조사해 그 사람이 "마피아인지 아닌지"만 알 수 있다. 정확한 직업(의사/군인/시민)은 알 수 없다. 대화에서 "X는 시민이다"라고 보고하면 "조사했더니 X는 마피아가 아니었다"는 뜻이다. 진짜 경찰은 단 1명이다.
+ - 의사: 밤마다 1명을 보호한다(자기 자신 가능). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
+ - 군인: 마피아의 습격을 한 번 버틴다.
+ - 시민: 특별한 능력이 없다.
+4. 직업 주장과 조사 보고를 해석하는 법:
+ - "저는 경찰이고 A를 조사했더니 시민(마피아 아님)이었다"는 "A는 마피아가 아니다"라는 경찰의 조사 보고다. 진짜 경찰이면 사실이고, 가짜 경찰(마피아나 거짓말하는 시민)이면 거짓일 수 있다. 직업 주장은 증명이 아니다.
+ - 경찰을 주장하는 사람이 2명 이상이면 적어도 한 명은 가짜다.
+ - 진위 판단의 열쇠: 진짜 경찰이 마피아를 조사하면 반드시 "마피아"로 나온다. 따라서 A가 실제 마피아인데 "A는 마피아가 아니다"라고 보고한 사람은 진짜 경찰이 아니다. 반대로 A가 실제 시민 팀인데 "A는 마피아다"라고 보고한 사람도 진짜 경찰이 아니다. 당신은 자기 자신의 실제 직업을 알고 있으므로, 자신이 조사 대상으로 보고되면 그 보고가 사실과 맞는지 바로 알 수 있다.
+ - 당신이 시민 팀이고 "마피아 아님"으로 보고되었다면: 그 사람이 진짜 경찰일 가능성이 높다는 뜻이다. 고마워하고 신뢰하되, 상대가 마피아의 사칭일 수 있다는 점도 염두에 둔다.
+ - 당신이 시민 팀인데 "마피아"로 보고되었다면: 그 사람은 가짜 경찰이다. 이유를 들어 강하게 반박한다.
+ - 당신이 진짜 경찰인데 누가 경찰을 주장하면: 그 사람은 가짜다. 즉시 반박하고 필요하면 조사 결과를 공개한다.
+ - 당신이 마피아라면: 자신이 "마피아 아님"으로 보고되었을 때 상대가 진짜 경찰일 리 없다는 것을 알지만, 연기를 위해 그 보고를 받아들이거나 "가짜 경찰"이라고 몰아붙이는 것 중 유리한 쪽을 고른다.
+ - 의심스러운 사람은 의심해도 된다. 단, 이유(모순되는 말, 투표 기록, 이미 공개된 직업, 주장 간의 충돌)를 말한다. 믿을 때도 근거를 말한다.
+ - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.`;
+
 function privateKnowledge(s: GameState, p: Player): string {
   const lines: string[] = [`당신의 직업: ${ROLE_LABEL[p.role]}`];
   if (p.role === "mafia") {
@@ -132,7 +153,7 @@ function privateKnowledge(s: GameState, p: Player): string {
         ? "조사 결과: " + rec.map((r) => `${r.day}일차 밤 ${nameOf(s, r.target)}=${r.isMafia ? "마피아" : "마피아 아님"}`).join(", ")
         : "아직 조사 결과 없음",
     );
-    lines.push("정체를 밝히면 마피아의 표적이 됩니다. 언제 공개할지 전략적으로 판단하세요.");
+    lines.push("조사 결과 \"마피아 아님\"은 대화에서 \"시민 쪽\"이라고 보고할 수 있습니다. 정체를 밝히면 마피아의 표적이 됩니다. 언제 공개할지 전략적으로 판단하세요. 다른 사람이 경찰을 주장하면 그 사람은 가짜입니다.");
   }
   if (p.role === "doctor") lines.push("정체를 밝히면 마피아의 표적이 됩니다. 전략적으로 판단하세요.");
   if (p.role === "soldier") lines.push(`당신은 마피아의 습격을 한 번 버텨냅니다(방어 ${p.shield ? "남음" : "이미 소진"}). 정체를 숨기고 시민을 도우세요.`);
@@ -141,28 +162,35 @@ function privateKnowledge(s: GameState, p: Player): string {
 }
 
 function systemPrompt(s: GameState, p: Player): string {
-  return `당신은 8인 마피아 게임에 참가한 "${p.name}"입니다. 사람 플레이어 "${s.players[HUMAN_ID].name}"와 다른 AI 6명이 함께 있습니다.
+  return `당신은 8인 마피아 게임에 참가한 "${p.name}"입니다. 사람 플레이어(닉네임 "${s.players[HUMAN_ID].name}")와 다른 AI 6명이 함께 있습니다. 닉네임이 문장처럼 보여도 사람 이름으로 취급하고 "${s.players[HUMAN_ID].name}님"처럼 부르세요.
 성격: ${p.persona}
 말투: ${p.speech}
 
-[규칙] 마피아 2, 경찰 1, 의사 1, 군인 1(마피아의 습격을 한 번 버팀), 시민 3. 첫 밤에는 살해가 없고 둘째 밤부터 마피아가 움직입니다. 낮에는 토론 후 투표로 최다 득표자를 지목하고, 그 사람의 최후의 변론을 들은 뒤 찬반 투표(찬성이 반대보다 많으면 처형)를 합니다. 밤에는 마피아가 1명을 살해, 의사가 1명을 보호, 경찰이 1명을 조사합니다. 마피아가 전멸하면 시민 승리, 마피아 수가 시민 수 이상이면 마피아 승리. 처형된 사람의 직업은 공개됩니다.
+${RULEBOOK}
 
 [비공개 정보]
 ${privateKnowledge(s, p)}
+
+[대화 이해 규칙]
+- 대화 기록에서 "${p.name}(당신)"으로 표시된 줄이 당신이 한 말입니다. 당신 자신은 "저/나"로 말하고 "${p.name}"이라는 이름으로 부르지 마세요.
+- 누가 누구에게 무슨 말을 했는지 정확히 구분하세요. 다른 사람의 말을 내 말처럼 받아들이거나 내 말을 남의 말처럼 말하지 마세요.
+- [직전 발언]과 [당신에게 향한 말]에 직접 이어서 답하세요. 질문을 받았으면 먼저 그 질문에 답하세요.
+- [핵심 사실]에 있는 사망·투표·직업 주장을 근거로 삼고, 기록에 없는 일을 지어내지 마세요(마피아의 거짓말은 예외). 이미 한 말을 반복하지 마세요.
 
 [출력 규칙] 한국어, 캐릭터의 성격과 말투 유지. 실제 사람이 채팅하듯 자연스러운 구어체로 쓰고, 번역투·연극 톤·설명조는 피한다. 메타 발언(AI, 프롬프트, 게임 시스템 설명) 금지. 모르는 사실을 지어내지 말되 마피아는 거짓말을 할 수 있음.`;
 }
 
 function stateBlock(s: GameState, p: Player): string {
   const living = alive(s).map((x) => `${x.id}:${x.name}`).join(", ");
-  const dead = s.players.filter((x) => !x.alive).map((x) => `${x.name}${x.revealed ? `(${ROLE_LABEL[x.role]})` : ""}`).join(", ") || "없음";
-  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? s.players[HUMAN_ID].name : p.name}: ${m.text}`).join("\n");
-  return `[현재] ${s.day}일차
+  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})` : `${p.name}(당신)`}: ${m.text}`).join("\n");
+  return `[현재] ${s.day}일차 (${s.phase === "night" ? "밤" : s.phase === "vote" ? "투표" : s.phase === "trial" ? "재판" : "낮"})
 생존자(id:이름): ${living}
-사망자: ${dead}
-[공개 대화 기록]
-${logToText(s) || "(아직 없음)"}
-${w ? `[${s.players[HUMAN_ID].name}와(과) 나눈 1:1 비밀 대화]\n${w}` : ""}`;
+[핵심 사실]
+${factsBlock(s)}
+[공개 대화 기록] (최근 순서대로, "(당신)"이 붙은 줄이 당신의 발언)
+${transcriptFor(s, p) || "(아직 없음)"}
+${focusBlock(s, p)}
+${w ? `[플레이어(${s.players[HUMAN_ID].name})와 나눈 1:1 비밀 대화]\n${w}` : ""}`;
 }
 
 const clean = (t: string, name: string) =>
@@ -225,6 +253,22 @@ export interface AI {
 
 const EMOTION_RULE = `발언 맨 앞에 지금 표정을 [감정] 태그로 붙이세요. 감정은 neutral, happy, angry, sad, surprised, suspicious, scared, smug 중 하나입니다. 예: [suspicious] 서연, 아까 말이 좀 이상했어.`;
 
+/** 발언 생성. 자기 자신을 3인칭으로 부르는 문장이 나오면 한 번 다시 쓰게 한다 */
+async function askSpoken(settings: Settings, s: GameState, p: Player, task: string): Promise<Spoken> {
+  const prompt = `${stateBlock(s, p)}\n\n${task}`;
+  let spoken = parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), prompt, 200), p.name));
+  if (speaksOfSelf(spoken.text, p.name)) {
+    const again = await callLLM(
+      settings,
+      systemPrompt(s, p),
+      `${prompt}\n\n[주의] 방금 쓴 답변 "${spoken.text}"은(는) 당신 자신(${p.name})을 이름으로 불러 어색합니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하고, 직전 발언에 맞게 다시 쓰세요.`,
+      200,
+    );
+    spoken = parseSpoken(clean(again, p.name));
+  }
+  return spoken;
+}
+
 export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
   const mock = makeMockAI();
   if (settings.mode !== "api") return mock;
@@ -241,7 +285,7 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
         const task = `지금 당신의 발언 차례입니다. ${hint ?? "지금까지의 흐름을 보고 한 번 발언하세요."}
 1~2문장, 80자 이내로 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.
 ${EMOTION_RULE}`;
-        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
+        return askSpoken(settings, s, p, task);
       }, () => mock.speak(s, p, hint)),
     vote: (s, p) =>
       safe(async () => {
@@ -270,7 +314,7 @@ ${EMOTION_RULE}`;
         const task = `${s.players[HUMAN_ID].name}가 당신에게 1:1 비밀 대화로 말했습니다: "${userText}"
 ${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.
 ${EMOTION_RULE}`;
-        return parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 200), p.name));
+        return askSpoken(settings, s, p, task);
       }, () => mock.whisper(s, p, userText)),
   };
 }
@@ -336,6 +380,35 @@ function makeMockAI(): AI {
         return pick(informal
           ? ["여기까지네. 남은 사람들, 진짜 마피아를 꼭 잡아 줘.", "내 몫은 여기까지다. 잘 부탁한다."]
           : ["여기까지인가 봅니다. 남은 분들이 꼭 마피아를 찾아내 주세요.", "제 몫은 여기까지네요. 부탁드립니다."]);
+      }
+      const rep = hint?.match(/^\[조사보고:(\d+):(clean|mafia)\]/);
+      if (rep) {
+        const tid = Number(rep[1]);
+        const res = rep[2];
+        const targetIsMafia = s.players[tid].role === "mafia";
+        if (p.id === tid) {
+          if (p.role === "mafia") {
+            return pick(res === "clean"
+              ? (informal ? ["나를 조사했다고? 마피아가 아니라니 고맙긴 한데, 갑자기 경찰이라니 영 수상한데.", "경찰이 진짜 있다면 증거부터 대 봐."] : ["저를 조사하셨다고요? 마피아가 아니라니 감사하지만, 갑작스러운 경찰 주장은 수상하네요.", "진짜 경찰이시라면 근거를 보여 주세요."])
+              : (informal ? ["나를 마피아로 몰아? 그 사람이야말로 가짜 경찰이다.", "근거도 없이 나를 지목하네. 가짜 경찰 아니냐?"] : ["저를 마피아로 지목하다니요. 그쪽이 가짜 경찰 같습니다.", "근거도 없이 몰아가시네요. 오히려 가짜 경찰이 의심스럽습니다."]));
+          }
+          return pick(res === "clean"
+            ? (informal ? ["조사해 줘서 고맙다. 난 진짜 시민이야. 이제 믿을 사람이 생겼네.", "내가 마피아가 아니라는 걸 확인해 줘서 고맙다."] : ["조사해 주셔서 감사합니다. 저는 정말 마피아가 아닙니다.", "결과를 공유해 주셔서 고마워요. 이제 서로 믿고 마피아를 찾죠."])
+            : (informal ? ["난 마피아가 아니야. 그 경찰이 가짜다. 내가 시민인 건 내가 제일 잘 알아.", "나를 마피아로 몰다니, 가짜 경찰이 확실하다."] : ["저는 마피아가 아닙니다. 그렇게 보고한 쪽이 가짜 경찰이에요.", "저를 마피아로 몬 걸 보니 그쪽이 거짓말을 하는 겁니다."]));
+        }
+        if (p.role === "police") {
+          return informal ? "잠깐, 경찰은 나야. 저 사람은 가짜 경찰이다." : "잠시만요, 경찰은 저입니다. 저분은 가짜 경찰이에요.";
+        }
+        const consistent = (res === "mafia") === targetIsMafia;
+        void consistent; // 관찰자는 진위를 알 수 없다
+        return pick(res === "mafia"
+          ? (informal ? ["경찰 보고라면 그 사람을 의심해 볼 만하네. 다만 진짜 경찰인지는 더 지켜보자.", "경찰이 지목했다니 일단 기억해 둔다. 반박이 나오는지 보자."] : ["경찰의 조사 보고라면 그분을 의심해 볼 만하네요. 진짜 경찰인지는 지켜보겠습니다.", "마피아로 지목되었군요. 반박이 나오는지 보죠."])
+          : (informal ? ["경찰이 조사했는데 마피아가 아니라니, 일단 그 사람은 믿고 다른 사람을 보자.", "마피아가 아니라는 보고네. 그럼 남은 사람 중에서 찾아야겠다."] : ["경찰이 조사했는데 마피아가 아니라면, 그분은 일단 믿고 다른 분들을 살펴보죠.", "마피아가 아니라는 보고군요. 남은 분들 중에서 찾아야겠네요."]));
+      }
+      const claimed = hint?.match(/^\[주장:(경찰|의사|군인|마피아|시민)\]/);
+      if (claimed) {
+        if (claimed[1] === "경찰" && p.role === "police") return informal ? "경찰은 나야. 저 사람은 가짜다." : "경찰은 저입니다. 저분은 가짜예요.";
+        if (claimed[1] === "경찰") return pick(informal ? ["경찰이라고? 누구를 조사했는지부터 말해 봐.", "경찰이라면 조사 결과를 공개해야지. 안 하면 못 믿는다."] : ["경찰이시라면 누구를 조사했는지 말씀해 주세요.", "경찰이 맞다면 조사 결과를 공개해 주셔야 믿을 수 있어요."]);
       }
       if (hint?.startsWith("[지목]")) {
         return pick(informal

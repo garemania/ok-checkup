@@ -102,7 +102,7 @@ export function logToText(s: GameState, limit = 40): string {
     .slice(-limit)
     .map((m) => {
       const who = m.from === "system" ? "[시스템]" : s.players[m.from].name;
-      const when = m.phase === "night" ? "밤" : m.phase === "vote" ? "투표" : "낮";
+      const when = m.phase === "night" ? "밤" : m.phase === "vote" ? "투표" : m.phase === "trial" ? "재판" : "낮";
       return `(${m.day}일차 ${when}) ${who}: ${m.text}`;
     })
     .join("\n");
