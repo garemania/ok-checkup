@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Link } from "react-router-dom";
 import { BUILD_LABEL } from "../buildInfo";
 import type { Settings } from "../types";
 
@@ -89,7 +90,9 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = 
             <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 p-2 text-[11px] leading-snug">{errors.join("\n\n")}</pre>
           </div>
         )}
-        <p className="text-center text-[11px] text-muted-foreground">{BUILD_LABEL}</p>
+        <p className="text-center text-[11px] text-muted-foreground">
+          {BUILD_LABEL} · <Link to="/mafia-test" className="underline" onClick={() => onOpenChange(false)}>API 대화 테스트</Link>
+        </p>
         <DialogFooter>
           <Button onClick={() => { onSave(s); onOpenChange(false); }}>저장</Button>
         </DialogFooter>

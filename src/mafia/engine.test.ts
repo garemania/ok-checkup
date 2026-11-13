@@ -999,3 +999,47 @@ describe("goals, hidden roles, abstaining", () => {
     expect(abstain).toBeGreaterThan(0);
   }, 30000);
 });
+
+describe("in-app API self test", () => {
+  it("runs all scenarios with the offline AI and the deterministic checks pass", async () => {
+    const { runSelfTest } = await import("./selftest");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const seen: string[] = [];
+    const results = await runSelfTest(ai, ai, "나", (r) => seen.push(r.title));
+    expect(results).toHaveLength(8);
+    expect(seen).toHaveLength(8);
+    for (const idx of [1, 2, 4, 5, 7]) {
+      for (const c of results[idx].checks) expect(`${results[idx].title} / ${c.label}: ${c.ok}`).toContain(": true");
+    }
+  }, 60000);
+});
+
+describe("obvious remarks, repeated interrogation, mentions vs addressing", () => {
+  it("does not treat a mention as addressing", async () => {
+    const { addresseeOf } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 6, "도윤님이 죽었다니 믿기지가 않아요... 서연님에 이어 또 한 명이 가다니");
+    s = addMsg(s, 6, "태오야 너는 어떻게 생각해?");
+    s = addMsg(s, 6, "서연님 어제 누구 찍으셨어요?");
+    expect(addresseeOf(s, s.log[0])).toBeNull();
+    expect(addresseeOf(s, s.log[1])).toBe(7);
+    expect(addresseeOf(s, s.log[2])).toBe(1);
+  });
+
+  it("flags stating the obvious about mafia targets", async () => {
+    const { ruleViolations } = await import("./context");
+    expect(ruleViolations("마피아가 노리는 사람이 계속 시민 쪽 같아서 더 답답하네요.")).toHaveLength(1);
+    expect(ruleViolations("마피아가 시민만 노리는 것 같아요")).toHaveLength(1);
+    expect(ruleViolations("도윤이 어제 태오를 의심했는데 바로 당했네요.")).toHaveLength(0);
+  });
+
+  it("flags asking the same person the same thing again the same day", async () => {
+    const { repeatsQuestion } = await import("./context");
+    let s = { ...createGame("나"), day: 2 };
+    s = addMsg(s, 7, "하은, 어제 왜 서연한테 투표했어?", "day");
+    s = addMsg(s, 3, "그냥 느낌이었어요...", "day");
+    expect(repeatsQuestion(s, 2, "하은님, 어제 왜 서연한테 투표하셨어요?")).toBe(true);
+    expect(repeatsQuestion(s, 2, "하은님 대답은 들었으니, 민재님 생각은 어때요?")).toBe(false);
+    expect(repeatsQuestion(s, 2, "민재님은 어제 누구 찍었어요?")).toBe(false);
+  });
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
 import { nextTurn, openerTurn } from "./director";
-import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
+import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WATCH_PER_DAY, MAX_WHISPERS_PER_DAY, WATCH_DELAY_MS, WATCH_LINES } from "./data";
 import { detectClaims, interpretByRules, normalizeHuman, savedOnNight } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
@@ -53,6 +53,22 @@ export function useMafiaGame(onError: (msg: string) => void) {
       nextResolver.current = resolve;
       setWaiting(true);
     });
+  /** "다음"을 누르거나 ms가 지나면 넘어간다 (지켜보기용) */
+  const waitNextOrTimeout = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        if (nextResolver.current === done) nextResolver.current = null;
+        setWaiting(false);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      nextResolver.current = done;
+      setWaiting(true);
+    });
+  // 지켜보기 중인지, 그만 보기를 눌렀는지
+  const [watching, setWatching] = useState(false);
+  const stopWatchRef = useRef(false);
   // 재판 중 사용자의 변론/찬반 입력을 기다리는 장치
   const [awaitingHuman, setAwaitingHuman] = useState(false);
   const humanResolver = useRef<((v: unknown) => void) | null>(null);
@@ -98,6 +114,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const startGame = () => {
     runId.current++;
     interruptRef.current = null;
+    stopWatchRef.current = true;
+    setWatching(false);
     advance();
     resolveHuman(null);
     ref.current = createGame(settings.nickname);
@@ -154,7 +172,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
       investigate: p ? { actor: p.actor, target: p.target } : null,
     });
     ref.current = after;
-    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }));
+    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0, watchUsed: 0 }));
     commit((x) => addMsg(x, "system", `${x.day}일차 낮이 밝았습니다. ${result}`, "day"));
     commit(finishIfWon);
     if (ref.current!.phase === "day") {
@@ -205,12 +223,19 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   /** 진행자가 정한 순서로 n줄 대화. 마지막 줄 뒤에는 멈추지 않는다. 사용자가 끼어들면 그 말을 처리하고 끝낸다. 중단되면 false */
-  const converse = async (id: number, lines: number, first?: ReturnType<typeof nextTurn>): Promise<boolean> => {
+  const converse = async (
+    id: number,
+    lines: number,
+    first?: ReturnType<typeof nextTurn>,
+    opts: { watch?: boolean } = {},
+  ): Promise<boolean> => {
     const engine = ai();
     for (let i = 0; i < lines; i++) {
       if (!alivePhaseGuard(id)) return false;
+      if (opts.watch && stopWatchRef.current) break;
       const cur = ref.current!;
-      const allowHuman = settings.autoSpeak && cur.autoUsed < MAX_AUTO_SPEAK_PER_DAY;
+      // 지켜보기에서는 AI들끼리만 대화한다 (내 대사 자동 없음)
+      const allowHuman = !opts.watch && settings.autoSpeak && cur.autoUsed < MAX_AUTO_SPEAK_PER_DAY;
       const turn = i === 0 && first ? first : nextTurn(cur, Math.random, { allowHuman });
       if (!turn) break;
       setSpeaking(turn.player.id);
@@ -230,12 +255,35 @@ export function useMafiaGame(onError: (msg: string) => void) {
         return { ...next, log, autoUsed: x.autoUsed + 1 };
       });
       if (i < lines - 1) {
-        await waitNext();
+        if (opts.watch) await waitNextOrTimeout(WATCH_DELAY_MS);
+        else await waitNext();
         if (!alivePhaseGuard(id)) return false;
         if (await handleInterrupt(id)) return alivePhaseGuard(id);
       }
     }
     return true;
+  };
+
+  /** 지켜보기: 토론 시간을 쓰지 않고 AI들끼리 몇 마디 나누는 것을 자동으로 넘기며 본다 */
+  const runWatch = async () => {
+    const s0 = ref.current;
+    if (!s0 || busy || s0.phase !== "day" || s0.watchUsed >= MAX_WATCH_PER_DAY) return;
+    const id = runId.current;
+    setBusy(true);
+    setWatching(true);
+    stopWatchRef.current = false;
+    commit((x) => ({ ...x, watchUsed: x.watchUsed + 1 }));
+    const ok = await converse(id, WATCH_LINES, undefined, { watch: true });
+    setWatching(false);
+    if (!ok) return;
+    setSpeaking(null);
+    setBusy(false);
+  };
+
+  /** 그만 보기: 지금 대사가 끝나면 지켜보기를 멈춘다 */
+  const stopWatch = () => {
+    stopWatchRef.current = true;
+    advance();
   };
 
   /** 대기 중 끼어든 말이 있으면 처리한다. 처리했으면 true */
@@ -430,7 +478,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   const goNight = () =>
-    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
+    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0, watchUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
 
   /** 최후의 변론 -> 찬반 투표 -> (처형 시) 유언. 중단되면 false */
   const runTrial = async (id: number, accusedId: number): Promise<boolean> => {
@@ -571,7 +619,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   return {
-    waiting, advance, awaitingHuman, submitDefense: (t: string | null) => resolveHuman(t), submitVerdict: (v: boolean) => resolveHuman(v), doAction, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
+    waiting, advance, watching, runWatch, stopWatch, awaitingHuman, submitDefense: (t: string | null) => resolveHuman(t), submitVerdict: (v: boolean) => resolveHuman(v), doAction, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
     startGame, quit, runNight, runRound, sendPublic, startVote, runVote,
     sendWhisper, whisperBlockReason, ...helpers,
   };

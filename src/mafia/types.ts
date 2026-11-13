@@ -78,6 +78,7 @@ export interface GameState {
   trialStage: TrialStage | null;
   actionsUsed: number; // 오늘 사용한 낮 행동 횟수
   autoUsed: number; // 오늘 플레이어 대신 자동으로 한 말의 수
+  watchUsed: number; // 오늘 사용한 "지켜보기" 횟수
   lastNightResult: string;
   winner?: "mafia" | "citizen";
   nextMsgId: number;

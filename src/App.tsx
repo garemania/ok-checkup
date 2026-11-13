@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import Index from "./pages/Index.tsx";
 import Mafia from "./pages/Mafia.tsx";
 import MafiaArt from "./pages/MafiaArt.tsx";
+import MafiaTest from "./pages/MafiaTest.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/mafia" element={<Mafia />} />
             <Route path="/mafia-art" element={<MafiaArt />} />
+            <Route path="/mafia-test" element={<MafiaTest />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

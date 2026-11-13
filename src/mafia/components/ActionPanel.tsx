@@ -3,7 +3,7 @@ import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS } from "../data";
+import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WATCH_PER_DAY } from "../data";
 import { alive, mafiaPartners } from "../engine";
 import { ROLE_LABEL } from "../types";
 import type { GameState, Role } from "../types";
@@ -15,6 +15,9 @@ interface Props {
   state: GameState;
   busy: boolean;
   waiting: boolean; // AI 대화 중 "다음" 대기 (이때는 끼어들어 말할 수 있다)
+  watching: boolean; // 지켜보기 중
+  onWatch: () => void;
+  onStopWatch: () => void;
   awaitingHuman: boolean;
   target: number | null;
   setTarget: (id: number | null) => void;
@@ -45,7 +48,7 @@ const ACTIONS = [
 type ActionKind = (typeof ACTIONS)[number]["kind"];
 const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
-export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
+export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
   const [talkTo, setTalkTo] = useState<number | null>(null); // 공개적으로 말을 걸 대상 (없으면 모두에게)
   const [defense, setDefense] = useState("");
@@ -177,6 +180,7 @@ export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTa
 
   /* ---------------- 낮 ---------------- */
   const roundsLeft = MAX_ROUNDS - state.round;
+  const watchLeft = MAX_WATCH_PER_DAY - state.watchUsed;
   const actionsLeft = MAX_ACTIONS_PER_DAY - state.actionsUsed;
   const canAct = me.alive && !busy && actionsLeft > 0;
   const needsTarget = mode !== null && ACTIONS.find((a) => a.kind === mode)?.needTarget;
@@ -272,11 +276,26 @@ export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTa
         />
         <Button type="submit" size="icon" disabled={!me.alive || (busy && !waiting) || !text.trim()} aria-label="보내기"><Send className="h-4 w-4" /></Button>
       </form>
-      <div className="flex gap-2">
-        <Button variant="secondary" className="flex-1" disabled={busy || roundsLeft <= 0} onClick={onRound}>
-          {roundsLeft === 1 ? "대화 진행 (마지막, 끝나면 투표)" : `대화 진행 (${roundsLeft}회 남음)`}
+      <div className="grid grid-cols-3 gap-1.5">
+        {watching ? (
+          <Button variant="outline" className="h-auto flex-col gap-0 py-1.5" onClick={onStopWatch}>
+            <span className="text-sm font-bold">그만 보기</span>
+            <span className="text-[10px] font-normal opacity-70">지금 대사 후 멈춤</span>
+          </Button>
+        ) : (
+          <Button variant="outline" className="h-auto flex-col gap-0 py-1.5" disabled={busy || watchLeft <= 0} onClick={onWatch}>
+            <span className="text-sm font-bold">지켜보기</span>
+            <span className="text-[10px] font-normal opacity-70">자동 재생 · 시간 안 씀 · {watchLeft}회</span>
+          </Button>
+        )}
+        <Button variant="secondary" className="h-auto flex-col gap-0 py-1.5" disabled={busy || roundsLeft <= 0} onClick={onRound}>
+          <span className="text-sm font-bold">대화 진행</span>
+          <span className="text-[10px] font-normal opacity-70">{roundsLeft === 1 ? "마지막 · 끝나면 투표" : `한 줄씩 · 토론 ${roundsLeft}회 남음`}</span>
         </Button>
-        <Button className="flex-1" disabled={busy} onClick={onStartVote}>투표로 넘어가기</Button>
+        <Button className="h-auto flex-col gap-0 py-1.5" disabled={busy} onClick={onStartVote}>
+          <span className="text-sm font-bold">투표 시작</span>
+          <span className="text-[10px] font-normal opacity-80">토론을 끝냄</span>
+        </Button>
       </div>
     </div>
   );
