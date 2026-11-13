@@ -1,6 +1,6 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, isRepetitive, reasoningNotes, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, isRepetitive, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -155,6 +155,8 @@ const RULEBOOK = `[게임 규칙 전체]
  - 믿을 때는 "~이니까 일단 믿겠다", "~님은 시민 쪽으로 본다"처럼 이유와 함께 분명히 말하고, 믿는 사람과 힘을 합쳐 다른 용의자를 찾는다.
  - 의심할 때도 구체적인 근거(모순, 주장 충돌, 누가 누구에게 투표했는지, 공개된 직업과의 불일치)를 댄다. 근거 없는 의심을 반복하지 않는다.
  - [공개된 사실만으로 확실한 것]에 있는 추론은 사실로 받아들인다.
+ - 당연한 사실(마피아는 시민 팀을 노린다, 밤에는 누군가 죽을 수 있다 등)을 새로운 발견처럼 말하지 않는다. 의미 있는 추리를 한다(예: "도윤이 어제 태오를 의심했는데 바로 당했다").
+ - 같은 사람에게 같은 내용으로 다시 추궁하지 않는다. 이미 물었고 답이 나왔으면, 그 답을 평가하거나 새 근거를 대거나 다른 이야기로 넘어간다.
  - 누가 정보를 공개했다는 이유만으로 의심하지 않는다. 주장이 공개된 사실과 맞으면 일단 그럴듯하게 받아들이고, 반박할 근거(맞서는 주장, 사실과의 모순)가 있을 때만 의심한다. 말을 했다고 몰아가지 말고, 같은 사람을 근거 없이 계속 몰아붙이지 않는다.
 8. 목표와 정보: 시민 팀(경찰, 의사, 군인, 시민)은 마피아를 모두 찾아 처형해야 이긴다. 마피아는 정체를 숨기고 시민 팀을 줄여 수가 같아지면 이긴다. 다른 사람의 직업은 아무도 모른다(마피아끼리만 서로 안다). AI든 사람이든 모두 같은 조건이니, 직업을 아는 척하지 말고 대화와 사실로 추리한다.
 9. 투표: 확실히 의심 가는 사람이 없으면 기권해도 된다. 근거 없이 아무나 찍지 않는다. 의심 가는 사람이 있으면 그 이유를 바탕으로 투표한다.
@@ -297,6 +299,7 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
     if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
     const dead = addressesDead(s, text, p.id);
     out.push(...ruleViolations(text));
+    if (repeatsQuestion(s, p.id, text)) out.push("오늘 이미 같은 사람에게 비슷한 내용으로 묻거나 추궁했습니다. 같은 걸로 다시 추궁하지 말고, 새 근거를 대거나 다른 이야기로 넘어가세요.");
     if (isRepetitive(s, p.id, text)) out.push("방금 나온 말(또는 당신이 최근에 한 말)과 거의 같습니다. 같은 얘기를 되풀이하지 말고 새로운 근거, 다른 사람, 다른 쟁점, 또는 결론을 말하세요.");
     if (dead !== null) out.push(`${s.players[dead].name}은(는) 이미 사망해서 말도 대답도 할 수 없습니다. 죽은 사람에게 묻거나 대답을 요구하지 말고 살아 있는 사람에게 말하세요. (생전의 발언을 근거로 언급하는 것은 괜찮습니다.)`);
     return out;
@@ -688,7 +691,7 @@ function makeMockAI(): AI {
     speak: async (s, p, hint) => {
       // 최근에 누가 이미 한 말과 똑같은 문장은 피한다 (몇 번 다시 고른다)
       let text = await raw.speak(s, p, hint);
-      for (let i = 0; i < 5 && isRepetitive(s, p.id, text); i++) text = await raw.speak(s, p, hint);
+      for (let i = 0; i < 5 && (isRepetitive(s, p.id, text) || repeatsQuestion(s, p.id, text)); i++) text = await raw.speak(s, p, hint);
       return { text, emotion: detectEmotion(text) };
     },
     vote: raw.vote,

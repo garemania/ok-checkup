@@ -338,13 +338,23 @@ export function focusBlock(s: GameState, viewer: Player): string {
 /** 발언 앞부분에서 누구를 부르고 있는지 찾는다 ("서연님, ...", "태오야 ..."). 없으면 null */
 export function addresseeOf(s: GameState, m: ChatMsg): number | null {
   if (m.from === "system") return null;
-  const head = normalizeHuman(m.text, s.players).text.slice(0, 18);
+  // "서연님, ..." / "태오야 ..." 처럼 부르는 말만 대상으로 본다. "도윤님이 죽었다니"처럼 언급만 한 것은 아니다
+  const full = normalizeHuman(m.text, s.players).text;
+  const head = full.slice(0, 24);
+  const secondPerson = /(\?|세요|주세요|해\s*봐|어때|생각해|말해|설명해|해\s*줘|하실래요|할래|했냐|하냐)/.test(full);
   let best: { id: number; at: number } | null = null;
   for (const q of s.players) {
     if (q.id === m.from) continue;
-    const re = new RegExp(`${q.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(님|씨|아|야|,|，)`);
-    const hit = re.exec(head);
-    if (hit && (best === null || hit.index < best.at)) best = { id: q.id, at: hit.index };
+    const esc = q.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`(?<![가-힣])${esc}(?:님|씨)?\\s*[,，!]`), // 서연님, / 태오,
+      new RegExp(`(?<![가-힣])${esc}(?:아|야)(?=[\\s,，!?]|$)`), // 태오야 / 서연아
+      ...(secondPerson ? [new RegExp(`^\\s*${esc}(?:님|씨)\\s`)] : []), // 서연님 어떻게 생각해요?
+    ];
+    for (const re of patterns) {
+      const hit = re.exec(head);
+      if (hit && (best === null || hit.index < best.at)) best = { id: q.id, at: hit.index };
+    }
   }
   return best ? best.id : null;
 }
@@ -383,6 +393,8 @@ export function ruleViolations(text: string): string[] {
     out.push("첫 밤에도 경찰 조사는 가능합니다. 조사가 불가능하다고 말하지 마세요.");
   if (/(기록|로그|상황판|핵심\s*사실|진행자|시스템|프롬프트)/.test(text))
     out.push('"기록", "상황판" 같은 게임 밖의 말을 쓰지 마세요. 게임 속 사람처럼 "어제 투표에서", "아까 ○○가 한 말"처럼 말하세요.');
+  if (/마피아(?:가|는)?\s*시민(?:\s*팀)?(?:을|만|들을)?\s*(?:노리|죽이|공격)|마피아(?:가|는)?\s*(?:노리는|노린|죽이는|죽인|공격하는)\s*(?:사람|건|게|대상|쪽)[^.!?]{0,15}시민/.test(text))
+    out.push("마피아가 시민 팀을 노리는 건 당연합니다. 당연한 말 대신, 누가 왜 그 사람을 노렸을지(그 사람이 무엇을 주장하거나 누구를 의심했는지) 같은 의미 있는 추리를 하세요.");
   return out;
 }
 
@@ -454,4 +466,14 @@ export function reasoningNotes(s: GameState, p: Player): string[] {
     else if (p.role !== "mafia") notes.push(`${name(r.by)}이(가) 나를 마피아가 아니라고 보고했고 사실이다. ${name(r.by)}은(는) 진짜 경찰일 가능성이 높다.`);
   }
   return notes;
+}
+
+/** 오늘 이미 같은 사람에게 비슷한 내용으로 묻거나 추궁했는지 */
+export function repeatsQuestion(s: GameState, speaker: number, text: string): boolean {
+  if (!/(\?|해명|설명|왜|뭐|어떻게|수상|의심|찜찜)/.test(text)) return false;
+  const targets = s.players.filter((p) => p.id !== speaker && text.includes(p.name)).map((p) => p.name);
+  if (!targets.length) return false;
+  return s.log.some(
+    (m) => m.from !== "system" && m.day === s.day && targets.some((n) => m.text.includes(n)) && similarity(m.text, text) >= 0.32,
+  );
 }
