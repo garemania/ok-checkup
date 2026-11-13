@@ -191,6 +191,14 @@ export function useMafiaGame(onError: (msg: string) => void) {
     const ok = await converse(id, lines);
     if (!ok) return;
     setSpeaking(null);
+    // 대화 횟수를 다 쓰면: 마지막 대사를 읽고 "다음"을 누르면 투표로 넘어간다
+    if (ref.current!.phase === "day" && ref.current!.round >= MAX_ROUNDS) {
+      await waitNext();
+      if (!alivePhaseGuard(id)) return;
+      if (ref.current!.phase === "day") {
+        commit((x) => addMsg({ ...x, phase: "vote", votes: {} }, "system", "대화 시간이 다 되었습니다. 투표를 시작합니다. 가장 의심되는 사람을 선택하세요.", "vote"));
+      }
+    }
     setBusy(false);
   };
 

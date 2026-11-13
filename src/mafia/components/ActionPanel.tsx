@@ -261,7 +261,7 @@ export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTa
       </form>
       <div className="flex gap-2">
         <Button variant="secondary" className="flex-1" disabled={busy || roundsLeft <= 0} onClick={onRound}>
-          대화 진행 ({roundsLeft}회 남음)
+          {roundsLeft === 1 ? "대화 진행 (마지막, 끝나면 투표)" : `대화 진행 (${roundsLeft}회 남음)`}
         </Button>
         <Button className="flex-1" disabled={busy} onClick={onStartVote}>투표로 넘어가기</Button>
       </div>
