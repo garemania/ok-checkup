@@ -30,7 +30,7 @@ export function InfoDialog({ state, open, onOpenChange }: { state: GameState; op
           )}
           <div className="rounded-lg bg-secondary/60 p-3 text-xs text-muted-foreground">
             구성: 마피아 2 · 경찰 1 · 의사 1 · 군인 1 · 시민 3<br />
-            첫 밤에는 살해가 없고, 둘째 밤부터 마피아가 움직입니다.<br />
+            첫 밤에는 마피아의 살해만 없고(경찰 조사는 가능), 둘째 밤부터 마피아가 움직입니다.<br />
             낮: 토론과 행동 → 투표(최다 득표자 지목, 동점이면 무효) → 최후의 변론 → 찬반 투표(찬성이 많으면 처형)<br />
             밤: 마피아 살해 · 의사 보호 · 경찰 조사 · 군인은 습격을 한 번 버팀<br />
             마피아 전멸 시 시민 승리, 마피아 수 ≥ 시민 수 시 마피아 승리
