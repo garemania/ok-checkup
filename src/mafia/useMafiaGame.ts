@@ -27,6 +27,7 @@ export function loadSettings(): Settings {
 
 export type DayAction =
   | { kind: "suspect" | "trust" | "ask"; target: number }
+  | { kind: "report"; target: number; result: "clean" | "mafia" }
   | { kind: "claim"; role: Role };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -244,7 +245,17 @@ export function useMafiaGame(onError: (msg: string) => void) {
       const label = ROLE_LABEL[a.role];
       text = `저는 ${label}입니다.`;
       emotion = "neutral";
-      items = shuffled([]).slice(0, 2).map((p) => ({ player: p, hint: `[주장] ${me0}가 자신이 ${label}${hasBatchim(label) ? "이" : ""}라고 공개적으로 주장했습니다. 믿는지 의심하는지 반응하세요.` }));
+      items = shuffled([]).slice(0, 2).map((p) => ({ player: p, hint: `[주장:${label}] ${me0}가 자신이 ${label}${hasBatchim(label) ? "이" : ""}라고 공개적으로 주장했습니다. 게임 규칙(직업 주장은 증명이 아님, 진짜 경찰은 1명)과 당신의 실제 직업에 비추어 믿을지 의심할지 근거와 함께 반응하세요.` }));
+    } else if (a.kind === "report") {
+      const t = s0.players[a.target];
+      const verdict = a.result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)";
+      text = `저는 경찰입니다. 조사해 보니 ${t.name}님은 ${a.result === "mafia" ? "마피아입니다" : "마피아가 아닙니다"}.`;
+      emotion = a.result === "mafia" ? "suspicious" : "neutral";
+      const tag = `[조사보고:${t.id}:${a.result}]`;
+      items = [{ player: t, hint: `${tag} ${me0}가 자신이 경찰이라며 당신을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신이 조사 대상입니다. [비공개 정보]의 당신의 실제 직업과 이 보고가 맞는지 규칙에 따라 판단해 반응하세요.` }];
+      shuffled([t.id]).slice(0, 2).forEach((p) =>
+        items.push({ player: p, hint: `${tag} ${me0}가 자신이 경찰이라며 ${t.name}님을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신은 조사 대상이 아닙니다. 보고의 신빙성을 규칙과 당신의 직업 정보에 비추어 판단해 반응하세요. 당신이 진짜 경찰이면 즉시 반박하세요.` }),
+      );
     } else {
       const t = s0.players[a.target];
       const rest = shuffled([t.id]);

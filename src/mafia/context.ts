@@ -34,6 +34,25 @@ export function detectClaims(s: GameState): Record<number, Role> {
   return out;
 }
 
+export interface Report { by: number; target: number; result: "clean" | "mafia" }
+
+/** "조사 결과 서연님은 마피아가 아닙니다" 같은 조사 보고를 찾는다 (같은 사람이 같은 대상을 다시 보고하면 마지막 것만) */
+export function detectReports(s: GameState): Report[] {
+  const map = new Map<string, Report>();
+  for (const m of s.log) {
+    if (m.from === "system" || !/조사/.test(m.text)) continue;
+    for (const q of s.players) {
+      if (q.id === m.from) continue;
+      const esc = q.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const hit = new RegExp(`${esc}\\s*(?:님)?\\s*(?:은|는|이|가)?\\s*(마피아(?:가|는)?\\s*(?:아닙니다|아니에요|아니야|아니다|아님)|마피아 아님|시민|마피아)`).exec(m.text);
+      if (!hit) continue;
+      const clean = /아닙니다|아니에요|아니야|아니다|아님|시민/.test(hit[1]);
+      map.set(`${m.from}:${q.id}`, { by: m.from as number, target: q.id, result: clean ? "clean" : "mafia" });
+    }
+  }
+  return [...map.values()];
+}
+
 /** 전체 기록에서 뽑은 핵심 사실 (최근 대화 40줄에서 밀려나도 잊지 않도록) */
 export function factsBlock(s: GameState): string {
   const lines: string[] = [];
@@ -43,6 +62,9 @@ export function factsBlock(s: GameState): string {
   const claims = detectClaims(s);
   const claimText = Object.entries(claims).map(([id, r]) => `${s.players[Number(id)].name}=${ROLE_LABEL[r]} 주장`);
   lines.push(`직업 주장: ${claimText.join(", ") || "아직 없음"}`);
+
+  const reports = detectReports(s).map((r) => `${s.players[r.by].name}이(가) ${s.players[r.target].name}을(를) 조사했다며 "${r.result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)"}"으로 보고`);
+  if (reports.length) lines.push(`조사 보고(직업 주장은 증명이 아님): ${reports.join(" / ")}`);
 
   for (const m of s.log) {
     if (m.from !== "system") continue;

@@ -366,3 +366,65 @@ describe("conversation context", () => {
     } finally { globalThis.fetch = orig; }
   });
 });
+
+describe("rules awareness", () => {
+  it("turns a police report into a structured fact", async () => {
+    const { detectReports, factsBlock } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 0, "저는 경찰입니다. 조사해 보니 서연님은 마피아가 아닙니다.");
+    s = addMsg(s, 3, "저는 경찰입니다. 조사해 보니 태오님은 마피아입니다.");
+    const r = detectReports(s);
+    expect(r).toContainEqual({ by: 0, target: 1, result: "clean" });
+    expect(r).toContainEqual({ by: 3, target: 7, result: "mafia" });
+    const f = factsBlock(s);
+    expect(f).toContain("서연을(를) 조사했다며 \"마피아 아님(시민 쪽)\"");
+    expect(f).toContain("조사 보고");
+  });
+
+  it("gives every AI the full rulebook including how to read police claims", async () => {
+    const orig = globalThis.fetch;
+    let system = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      system = JSON.parse(init.body as string).systemInstruction.parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[neutral] 네." }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      await ai.speak(s, s.players[1]);
+      expect(system).toContain("진짜 경찰이 마피아를 조사하면 반드시");
+      expect(system).toContain("마피아가 아니었다");
+      expect(system).toContain("직업 주장은 증명이 아니다");
+    } finally { globalThis.fetch = orig; }
+  });
+
+  const setup = () => {
+    const s = createGame("나");
+    const mafia = s.players.filter((p) => p.role === "mafia" && !p.isHuman);
+    const citizen = s.players.find((p) => !p.isHuman && p.role !== "mafia" && p.role !== "police")!;
+    const police = s.players.find((p) => !p.isHuman && p.role === "police");
+    return { s, mafia, citizen, police };
+  };
+
+  it("a truly innocent target thanks the police reporter; a mafia target doubts them", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const { s, mafia, citizen } = setup();
+    const tag = (id: number) => `[조사보고:${id}:clean] 플레이어가 경찰이라며 당신을 조사한 결과 "마피아 아님"이라고 보고했습니다.`;
+    const thanks = await ai.speak(s, citizen, tag(citizen.id));
+    expect(thanks.text).toMatch(/고맙|감사|고마워/);
+    if (mafia.length) {
+      const doubt = await ai.speak(s, mafia[0], tag(mafia[0].id));
+      expect(doubt.text).toMatch(/수상|증거|근거|가짜/);
+    }
+  }, 30000);
+
+  it("the real police AI calls out a fake police claim", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const { s, police, citizen } = setup();
+    if (!police) return;
+    const said = await ai.speak(s, police, `[조사보고:${citizen.id}:clean] 플레이어가 경찰이라며 보고했습니다.`);
+    expect(said.text).toMatch(/경찰은 (나|저)/);
+    const claim = await ai.speak(s, police, "[주장:경찰] 플레이어가 자신이 경찰이라고 주장했습니다.");
+    expect(claim.text).toMatch(/경찰은 (나|저)/);
+  }, 30000);
+});
