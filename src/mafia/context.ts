@@ -209,9 +209,9 @@ export function detectSaves(s: GameState): SaveClaim[] {
   return out;
 }
 
-/** N일차 아침에 "의사가 누군가를 구해냈다"는 안내가 있었는지 (= N일차 밤에 의사가 습격을 막음) */
-export function savedOnNight(s: GameState, day: number): boolean {
-  return s.log.some((m) => m.from === "system" && m.day === day && /구해냈/.test(m.text));
+/** N일차 아침에 "밤사이 아무도 죽지 않았다"는 안내가 있었는지 (둘째 밤부터. 의사가 막았거나 군인이 버텼다는 뜻이며, 어느 쪽인지는 아무도 모른다) */
+export function noDeathOnNight(s: GameState, day: number): boolean {
+  return day > 1 && s.log.some((m) => m.from === "system" && m.day === day && /아무도 죽지 않았/.test(m.text));
 }
 
 /** 발언 하나의 해석 요약 (AI에게 보여주는 기록용) */
@@ -257,7 +257,7 @@ export function factsBlock(s: GameState): string {
   for (const m of s.log) {
     if (m.from !== "system") continue;
     const t = m.text;
-    if (/살해당했|처형되었|처형되지|버텨냈|구해냈|조용히 지나갔|평화로운 밤/.test(t)) {
+    if (/살해당했|처형되었|처형되지|아무도 죽지 않았|조용히 지나갔/.test(t)) {
       lines.push(`${m.day}일차 사건: ${t.replace(/\n+/g, " ")}`);
     } else if (t.startsWith("투표 결과")) {
       const votes = t.split("\n").filter((x) => x.includes("→")).map((x) => x.replace(" → ", "→")).join(", ");
@@ -308,10 +308,14 @@ export function deductions(s: GameState): string[] {
   for (const v of detectSaves(s)) {
     const by = s.players[v.by].name;
     const t = s.players[v.target].name;
-    if (savedOnNight(s, v.day))
-      out.push(`${by}은(는) ${t}을(를) 보호했다고 했고, ${v.day}일차 아침에 실제로 "의사가 누군가를 구해냈다"는 안내가 있었다. ${by}의 의사 주장이 사실이라면 ${t}은(는) 마피아의 습격 대상이었으므로 마피아가 아니다(마피아는 자기편을 습격하지 않는다). 이것은 의사의 추론이지 경찰의 조사가 아니다.`);
+    if (noDeathOnNight(s, v.day))
+      out.push(`${by}은(는) ${t}을(를) 보호했다고 했고, ${v.day}일차 밤에는 실제로 아무도 죽지 않았다. ${by}의 의사 주장이 사실이고 그 밤 의사가 막은 것이라면 ${t}은(는) 마피아의 습격 대상이었으므로 마피아가 아니다. 다만 군인이 버텼을 가능성도 있어 확정은 아니다. 이것은 의사의 추론이지 경찰의 조사가 아니다.`);
     else
-      out.push(`${by}은(는) ${t}을(를) 보호했다고 했지만, ${v.day}일차 아침에 습격을 막았다는 안내는 없었다. 보호했다는 사실만으로는 ${t}이(가) 마피아가 아니라는 근거가 되지 않는다.`);
+      out.push(`${by}은(는) ${t}을(를) 보호했다고 했지만, 그 밤에 누군가 죽었으므로 ${t}은(는) 그 밤의 표적이 아니었다. 보호했다는 사실만으로는 ${t}이(가) 마피아가 아니라는 근거가 되지 않는다.`);
+  }
+  for (const m of s.log) {
+    if (m.from === "system" && m.day > 1 && /아무도 죽지 않았/.test(m.text))
+      out.push(`${m.day}일차 밤에는 아무도 죽지 않았다. 의사가 표적을 지켰거나 군인이 습격을 버텼다는 뜻이며, 어느 쪽인지는 아무도 모른다.`);
   }
   // 마피아 공개 수
   const mafiaDead = s.players.filter((p) => p.revealed && p.role === "mafia").length;
@@ -444,7 +448,11 @@ export function reasoningNotes(s: GameState, p: Player): string[] {
   }
   if (p.role === "doctor") {
     for (const r of s.doctorLog[p.id] ?? [])
-      notes.push(r.saved ? `내가 ${r.day}일차 밤에 보호한 ${name(r.target)}이(가) 실제로 습격을 받았고 내가 살렸다. ${name(r.target)}은(는) 마피아의 표적이었으니 마피아가 아니다(확실).` : `내가 ${r.day}일차 밤에 ${name(r.target)}을(를) 보호했다(그날 그 사람은 습격받지 않았다).`);
+      notes.push(
+        r.quiet
+          ? `내가 ${r.day}일차 밤에 ${name(r.target)}을(를) 보호했고 그 밤 아무도 죽지 않았다. 내가 막았을 수도 있지만 군인이 버텼을 수도 있어 확실하지 않다. 내가 막은 것이라면 ${name(r.target)}은(는) 마피아의 표적이었으니 마피아가 아니다.`
+          : `내가 ${r.day}일차 밤에 ${name(r.target)}을(를) 보호했지만 그 밤 다른 사람이 죽었다. ${name(r.target)}은(는) 그 밤의 표적이 아니었다.`,
+      );
     others("doctor").forEach((id) => notes.push(`${name(id)}은(는) 의사를 주장하지만 진짜 의사는 나다. ${name(id)}은(는) 가짜다.`));
   }
   if (p.role === "soldier") {
@@ -455,7 +463,7 @@ export function reasoningNotes(s: GameState, p: Player): string[] {
     const partners = s.players.filter((x) => x.role === "mafia" && x.id !== p.id).map((x) => x.name);
     if (partners.length) notes.push(`동료 마피아: ${partners.join(", ")}. 동료를 대놓고 감싸면 들킨다.`);
     for (const k of s.mafiaLog)
-      notes.push(`${k.day}일차 밤 우리가 노린 ${name(k.target)}: ${k.result === "killed" ? "살해 성공" : k.result === "saved" ? "의사가 막음(그 밤 의사가 그를 보호했다)" : "버텨냄(군인일 가능성이 높다)"}.`);
+      notes.push(`${k.day}일차 밤 우리가 노린 ${name(k.target)}: ${k.result === "killed" ? "살해 성공" : "습격 실패(의사가 그를 지켰거나 그가 군인이라 버텼다. 어느 쪽인지는 모른다)"}.`);
     (["police", "doctor"] as Role[]).forEach((r) => others(r).filter((id) => s.players[id].alive).forEach((id) => notes.push(`${name(id)}은(는) ${ROLE_LABEL[r]}을(를) 주장했다. 진짜라면 위협이 되니 밤의 표적 후보다.`)));
   }
   // 나에 대한 보고는 내 실제 직업으로 진위를 안다

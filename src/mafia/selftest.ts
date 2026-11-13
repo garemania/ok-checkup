@@ -69,7 +69,7 @@ export async function runSelfTest(ai: AI, fallback: AI, nickname: string, onResu
   // 2. 의사의 보호 보고 (경찰 조사로 오해하지 않기)
   {
     let s: GameState = { ...game(nickname, "doctor"), day: 2, phase: "day" };
-    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다.", "day");
+    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 밤사이 아무도 죽지 않았습니다.", "day");
     const text = "저 의사예요. 어젯밤 서연 보호했어요. 그래서 서연은 마피아 아닌 거 알아요.";
     s = addMsg(s, HUMAN_ID, text, "day");
     const meaning = (await ai.interpret(s, text)) ?? interpretByRules(text, s.players, HUMAN_ID);
@@ -77,7 +77,7 @@ export async function runSelfTest(ai: AI, fallback: AI, nickname: string, onResu
     const lines = [`나: ${text}`, `해석: ${meaning.summary ?? "(없음)"}`];
     let asksPolice = false;
     for (const id of [1, 3]) {
-      const hint = `[의사보고:1:saved] ${nickname}가 자신이 의사이며 어젯밤 서연님을 보호했다고 말했습니다. 오늘 아침 "의사가 누군가를 구해냈다"는 안내가 있었으므로, 이 말이 사실이면 서연은 마피아의 습격 대상이었고 마피아가 아니다. 이것은 경찰 조사가 아니니 "조사를 어떻게 했냐", "경찰이냐"고 묻지 말고 짧게 반응하세요.`;
+      const hint = `[의사보고:1:saved] ${nickname}가 자신이 의사이며 어젯밤 서연님을 보호했다고 말했습니다. 어젯밤 아무도 죽지 않았으므로, 이 말이 사실이고 의사가 막은 것이라면 서연은 마피아의 습격 대상이었고 마피아가 아니다(군인이 버텼을 가능성도 있다). 이것은 경찰 조사가 아니니 "조사를 어떻게 했냐", "경찰이냐"고 묻지 말고 짧게 반응하세요.`;
       const said = await ai.speak(s, s.players[id], hint);
       s = addMsg(s, id, said.text, "day", said.emotion);
       lines.push(`${name(s, id)}: ${said.text}`);

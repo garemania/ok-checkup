@@ -46,7 +46,6 @@ export function createGame(nickname: string): GameState {
     trialStage: null,
     actionsUsed: 0,
     autoUsed: 0,
-    watchUsed: 0,
     lastNightResult: "",
     nextMsgId: 1,
   };
@@ -135,37 +134,40 @@ export function emotionOf(s: GameState, id: number): Emotion | "dead" {
   return "neutral";
 }
 
-/** 밤 결과 처리. 첫 밤(1일차)에는 마피아가 습격하지 않고, 경찰 조사만 진행된다. */
+/**
+ * 밤 결과 처리. 첫 밤(1일차)에는 마피아가 습격하지 않고, 경찰 조사만 진행된다.
+ * 아침 안내는 누가 죽었는지만 알려준다. 아무도 죽지 않은 이유(의사의 보호인지 군인의 방어인지)는 누구에게도 알려주지 않는다.
+ */
 export function resolveNight(
   s: GameState,
   a: { kill: number | null; protect: number | null; protector?: number; investigate: { actor: number; target: number } | null },
 ): { state: GameState; result: string } {
   let st = s;
-  if (a.protector !== undefined && a.protect !== null && st.day > 1) {
-    const rec = { day: st.day, target: a.protect, saved: a.kill !== null && a.kill === a.protect };
-    st = { ...st, doctorLog: { ...st.doctorLog, [a.protector]: [...(st.doctorLog[a.protector] ?? []), rec] } };
-  }
   if (a.investigate) {
     const { actor, target } = a.investigate;
     const inv = { target, isMafia: st.players[target].role === "mafia", day: st.day };
     st = { ...st, policeLog: { ...st.policeLog, [actor]: [...(st.policeLog[actor] ?? []), inv] } };
   }
   if (st.day === 1) return { state: st, result: "첫 밤은 조용히 지나갔습니다. 마피아의 습격은 없었습니다. (경찰 조사 같은 능력은 첫 밤에도 정상적으로 사용할 수 있습니다.)" };
-  if (a.kill === null) return { state: st, result: "평화로운 밤이 지나갔습니다." };
-  const logKill = (result: "killed" | "saved" | "shielded") => ({ ...st, mafiaLog: [...st.mafiaLog, { day: st.day, target: a.kill as number, result }] });
-  if (a.protect === a.kill) {
-    st = logKill("saved");
-    return { state: st, result: "마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다." };
+
+  let died: number | null = null;
+  if (a.kill !== null) {
+    const victim = st.players[a.kill];
+    const blocked = a.protect === a.kill || (victim.role === "soldier" && victim.shield);
+    st = { ...st, mafiaLog: [...st.mafiaLog, { day: st.day, target: victim.id, result: blocked ? "failed" : "killed" }] };
+    if (a.protect !== a.kill && victim.role === "soldier" && victim.shield) {
+      st = { ...st, players: st.players.map((p) => (p.id === victim.id ? { ...p, shield: false } : p)) };
+    }
+    if (!blocked) {
+      st = kill(st, victim.id, false);
+      died = victim.id;
+    }
   }
-  const victim = st.players[a.kill];
-  if (victim.role === "soldier" && victim.shield) {
-    st = logKill("shielded");
-    st = { ...st, players: st.players.map((p) => (p.id === victim.id ? { ...p, shield: false } : p)) };
-    return { state: st, result: "마피아의 습격이 있었지만, 누군가 버텨냈습니다. 아무도 죽지 않았습니다." };
+  if (a.protector !== undefined && a.protect !== null) {
+    const rec = { day: st.day, target: a.protect, quiet: died === null };
+    st = { ...st, doctorLog: { ...st.doctorLog, [a.protector]: [...(st.doctorLog[a.protector] ?? []), rec] } };
   }
-  st = logKill("killed");
-  st = kill(st, victim.id, false);
-  return { state: st, result: `밤사이 ${victim.name}님이 마피아에게 살해당했습니다.` };
+  return { state: st, result: died !== null ? `밤사이 ${st.players[died].name}님이 마피아에게 살해당했습니다.` : "밤사이 아무도 죽지 않았습니다." };
 }
 
 /** 최후 찬반 투표: 찬성이 반대보다 많아야 처형 */

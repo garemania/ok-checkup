@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,6 +32,23 @@ const Mafia = () => {
   const day = state?.day;
   const phase = state?.phase;
   useEffect(() => { setTarget(null); }, [day, phase]);
+
+  // 나만 아는 밤 결과를 아침에 개인 알림으로 (다른 사람에게는 보이지 않음)
+  const lastNotified = useRef<string>("");
+  useEffect(() => {
+    if (!state) { lastNotified.current = ""; return; } // 새 게임이면 다시 알림
+    if (state.phase !== "day") return;
+    const key = `${state.day}`;
+    if (lastNotified.current === key) return;
+    lastNotified.current = key;
+    const me = state.players[HUMAN_ID];
+    const inv = (state.policeLog[HUMAN_ID] ?? []).find((r) => r.day === state.day);
+    if (inv) toast(`조사 결과(나만 앎): ${state.players[inv.target].name}님은 ${inv.isMafia ? "마피아입니다" : "마피아가 아닙니다"}.`, { duration: 8000 });
+    if (me.role === "soldier" && me.alive && !me.shield && state.mafiaLog.some((k) => k.day === state.day && k.target === HUMAN_ID))
+      toast("어젯밤 마피아가 당신을 노렸지만 버텨냈습니다(나만 앎). 방어 능력은 이제 없습니다.", { duration: 8000 });
+    const prot = (state.doctorLog[HUMAN_ID] ?? []).find((r) => r.day === state.day);
+    if (prot) toast(`보호 결과(나만 앎): ${state.players[prot.target].name}님을 지킨 밤, ${prot.quiet ? "아무도 죽지 않았습니다(막았을 수도, 군인이 버텼을 수도)" : "다른 사람이 죽었습니다"}.`, { duration: 8000 });
+  }, [state?.day, state?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state && state.log.length === 1) setInfoOpen(true); }, [state?.log.length === 1]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!state) {
@@ -88,7 +105,7 @@ const Mafia = () => {
           })}
         </section>
 
-        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} watching={g.watching} onNext={g.advance} />
+        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} watching={g.watching} autoAdvance={g.settings.autoAdvance} onToggleAuto={g.toggleAutoAdvance} onNext={g.advance} />
 
         <footer className="rounded-2xl border border-border bg-card">
           {target !== null && (state.phase === "night" || state.phase === "vote") && (

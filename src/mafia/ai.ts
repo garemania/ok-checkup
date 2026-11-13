@@ -146,7 +146,8 @@ const RULEBOOK = `[게임 규칙 전체]
  - 당신이 마피아라면: 자신이 "마피아 아님"으로 보고되었을 때 상대가 진짜 경찰일 리 없다는 것을 알지만, 연기를 위해 그 보고를 받아들이거나 "가짜 경찰"이라고 몰아붙이는 것 중 유리한 쪽을 고른다.
  - 의심스러운 사람은 의심해도 된다. 단, 이유(모순되는 말, 누가 누구에게 투표했는지, 이미 공개된 직업, 주장 간의 충돌)를 말한다. 믿을 때도 근거를 말한다.
  - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.
- - 의사의 보호 보고는 경찰 조사가 아니다. "○○를 보호했다/살렸다"는 의사의 말이다. 그날 아침 "의사가 누군가를 구해냈다"는 안내가 있었다면, 보호받은 사람은 마피아의 습격 대상이었으므로 마피아가 아니다(마피아는 자기편을 습격하지 않는다). 의사가 이를 근거로 "○○는 마피아가 아니다"라고 하는 것은 정상적인 추론이다. 의사에게 "조사를 어떻게 했냐", "경찰이냐"고 묻지 않는다.
+ - 아침 안내는 누가 죽었는지만 알려준다. "밤사이 아무도 죽지 않았다"는 의사가 표적을 지켰거나 군인이 습격을 버텼다는 뜻이며, 어느 쪽인지는 아무도 모른다(마피아, 의사 본인도 모른다).
+ - 의사의 보호 보고는 경찰 조사가 아니다. "○○를 보호했다/살렸다"는 의사의 말이다. 그 밤 아무도 죽지 않았고 의사의 말이 사실이라면 보호받은 사람이 표적이었을 수 있고, 그렇다면 마피아가 아니다(마피아는 자기편을 습격하지 않는다). 다만 군인이 버텼을 가능성도 있어 확정은 아니다. 의사가 이를 근거로 말하는 것은 정상적인 추론이니, 의사에게 "조사를 어떻게 했냐", "경찰이냐"고 묻지 않는다.
  - 이미 나온 조사 보고(대상과 결과)를 두고 "누구를 조사했냐", "결과가 뭐냐"고 다시 묻지 않는다. 그 보고를 사실로 받아들일지 거짓으로 볼지를 판단해 반응한다.
  - "언제 조사했냐"는 따질 필요가 없다. 경찰은 매 밤 한 명씩 조사하므로 보고된 조사는 지난밤(들) 중 하나에 한 것이다. 조사 횟수가 지난 밤의 수보다 많을 때만 모순이다.
  - 플레이어가 "말했잖아", "아까 말했지" 등으로 이전 발언을 가리키면 앞선 대화에서 그 발언을 찾아 이어서 이해한다.
@@ -264,8 +265,14 @@ export function parseTarget(text: string, candidates: number[], names: Record<nu
 async function askTarget(settings: Settings, s: GameState, p: Player, cands: number[], task: string, key: "vote" | "target"): Promise<number | null> {
   const names = Object.fromEntries(cands.map((id) => [id, s.players[id].name]));
   const list = cands.map((id) => `${id}:${names[id]}`).join(", ");
-  const prompt = `${stateBlock(s, p)}\n\n${task}\n후보(id:이름): ${list}\n반드시 JSON 한 줄만 출력: {"${key}": <후보의 id 숫자>, "reason": "짧은 이유"}`;
+  const shape = key === "vote" ? `{"vote": <후보의 id 숫자 또는 null>, "confidence": <0~100>, "reason": "짧은 이유"}` : `{"${key}": <후보의 id 숫자>, "reason": "짧은 이유"}`;
+  const prompt = `${stateBlock(s, p)}\n\n${task}\n후보(id:이름): ${list}\n반드시 JSON 한 줄만 출력: ${shape}`;
   const first = await callLLM(settings, systemPrompt(s, p), prompt, 200);
+  // 투표는 확신이 낮으면(60 미만) 기권으로 본다
+  if (key === "vote") {
+    const conf = first.match(/"confidence"\s*:\s*(\d+)/);
+    if (conf && Number(conf[1]) < 60) return null;
+  }
   const r1 = parseTarget(first, cands, names);
   if (r1 !== undefined) return r1;
   const second = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[이전 답변이 형식에 맞지 않았습니다] 위 후보 중 id 숫자 하나만 골라 {"${key}": 숫자} 형식으로만 답하세요.`, 200);
@@ -334,7 +341,7 @@ ${EMOTION_RULE}`;
     vote: (s, p) =>
       safe(async () => {
         const cands = alive(s).filter((x) => x.id !== p.id).map((x) => x.id);
-        return askTarget(settings, s, p, cands, "투표 시간입니다. 처형할(가장 마피아 같은) 사람을 고르세요. 확실한 근거가 있는 의심 대상이 없다면 기권하세요(vote에 null).", "vote");
+        return askTarget(settings, s, p, cands, "투표 시간입니다. 기본은 기권(vote에 null)입니다. 마피아라고 볼 분명한 근거(반박 없는 경찰 보고, 드러난 거짓말·모순, 공개된 사실과 맞지 않는 주장)가 있을 때만 그 사람을 고르세요. 누군지 잘 모르겠으면 반드시 기권하세요. confidence(0~100)에 확신 정도를 적으세요.", "vote");
       }, () => mock.vote(s, p)),
     nightTarget: (s, p, kind) =>
       safe(async () => {
@@ -547,9 +554,9 @@ function makeMockAI(): AI {
         }
         if (confirmed)
           return pick(!informal
-            ? [`어젯밤 의사가 구한 사람이 ${tn2}님이라면 ${tn2}님은 마피아 표적이었으니 시민 쪽이겠네요.`, `의사가 막은 습격이 ${tn2}님이었다면 이야기가 맞아요. ${tn2}님은 믿어도 될 것 같아요.`]
-            : [`어젯밤 살린 게 ${tn2}라면 ${tn2}는 표적이었으니 시민 쪽이겠네.`, `의사가 막은 게 ${tn2}였으면 말이 맞아. ${tn2}는 믿어도 되겠다.`]);
-        return pick(!informal ? [`보호했다는 건 알겠어요. 다만 그날 습격이 막힌 건 아니라서 ${tn2}님이 확실히 시민이라고 하긴 어렵네요.`] : [`지켰다는 건 알겠어. 근데 그날 습격을 막은 건 아니니까 ${tn2}가 확실히 시민이라곤 못 하겠다.`]);
+            ? [`어젯밤 아무도 안 죽은 게 의사 덕이라면 ${tn2}님은 표적이었으니 시민 쪽이겠네요. 군인이 버텼을 수도 있지만요.`, `말이 맞는다면 ${tn2}님은 믿어도 될 것 같아요. 그래도 확정은 아니니 지켜볼게요.`]
+            : [`어젯밤 아무도 안 죽은 게 의사 덕이면 ${tn2}는 표적이었으니 시민 쪽이겠네. 군인이 버텼을 수도 있지만.`, `말이 맞으면 ${tn2}는 믿어도 되겠다. 확정은 아니지만.`]);
+        return pick(!informal ? [`보호했다는 건 알겠어요. 다만 그날 다른 분이 돌아가셨으니 ${tn2}님이 표적은 아니었네요.`] : [`지켰다는 건 알겠어. 근데 그날 딴 사람이 죽었으니 ${tn2}가 표적은 아니었네.`]);
       }
       const claimed = hint?.match(/^\[주장:(경찰|의사|군인|마피아|시민)\]/);
       if (claimed) {
@@ -641,8 +648,8 @@ function makeMockAI(): AI {
       await wait(150 + Math.random() * 250);
       const sc = suspicion(s, p);
       const t = top(sc);
-      // 시민 팀은 의심 근거가 약하면 기권한다 (기본 점수는 0~2의 무작위)
-      if (t !== null && p.role !== "mafia" && sc[t] < 1.8) return null;
+      // 누군지 모르면 기권: 기본 점수는 0~2의 무작위이므로, 지목·조사 보고 같은 실제 근거로 점수가 2.4 이상 올라간 사람에게만 투표한다
+      if (t === null || sc[t] < 2.4) return p.role === "mafia" && t !== null && Math.random() < 0.3 ? t : null;
       return t;
     },
     async nightTarget(s, p, kind) {
@@ -670,7 +677,8 @@ function makeMockAI(): AI {
       const sc = suspicion(s, p);
       const known = (s.policeLog[p.id] ?? []).find((r) => r.target === accused);
       if (known) return known.isMafia;
-      return top(sc) === accused || (sc[accused] ?? 0) > 1.6 || Math.random() < 0.35;
+      // 확신이 없으면 처형에 반대한다 (근거가 있는 경우에만 찬성)
+      return (top(sc) === accused && (sc[accused] ?? 0) >= 2.4) || (sc[accused] ?? 0) > 2.8 || Math.random() < 0.15;
     },
     async whisper(s, p, userText) {
       await wait(500 + Math.random() * 500);

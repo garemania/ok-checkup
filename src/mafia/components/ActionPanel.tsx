@@ -3,7 +3,7 @@ import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WATCH_PER_DAY } from "../data";
+import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS } from "../data";
 import { alive, mafiaPartners } from "../engine";
 import { ROLE_LABEL } from "../types";
 import type { GameState, Role } from "../types";
@@ -180,7 +180,6 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
 
   /* ---------------- 낮 ---------------- */
   const roundsLeft = MAX_ROUNDS - state.round;
-  const watchLeft = MAX_WATCH_PER_DAY - state.watchUsed;
   const actionsLeft = MAX_ACTIONS_PER_DAY - state.actionsUsed;
   const canAct = me.alive && !busy && actionsLeft > 0;
   const needsTarget = mode !== null && ACTIONS.find((a) => a.kind === mode)?.needTarget;
@@ -276,6 +275,9 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
         />
         <Button type="submit" size="icon" disabled={!me.alive || (busy && !waiting) || !text.trim()} aria-label="보내기"><Send className="h-4 w-4" /></Button>
       </form>
+      <p className="text-center text-[11px] text-muted-foreground">
+        {roundsLeft > 1 ? `토론 시간 ${roundsLeft}회 남음 (지켜보기·대화 진행 합산)` : roundsLeft === 1 ? "토론 시간 마지막 1회 · 끝나면 투표" : "토론 시간이 끝났습니다"}
+      </p>
       <div className="grid grid-cols-3 gap-1.5">
         {watching ? (
           <Button variant="outline" className="h-auto flex-col gap-0 py-1.5" onClick={onStopWatch}>
@@ -283,14 +285,14 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
             <span className="text-[10px] font-normal opacity-70">지금 대사 후 멈춤</span>
           </Button>
         ) : (
-          <Button variant="outline" className="h-auto flex-col gap-0 py-1.5" disabled={busy || watchLeft <= 0} onClick={onWatch}>
+          <Button variant="outline" className="h-auto flex-col gap-0 py-1.5" disabled={busy || roundsLeft <= 0} onClick={onWatch}>
             <span className="text-sm font-bold">지켜보기</span>
-            <span className="text-[10px] font-normal opacity-70">자동 재생 · 시간 안 씀 · {watchLeft}회</span>
+            <span className="text-[10px] font-normal opacity-70">AI끼리 대화 · 시간 1회</span>
           </Button>
         )}
         <Button variant="secondary" className="h-auto flex-col gap-0 py-1.5" disabled={busy || roundsLeft <= 0} onClick={onRound}>
           <span className="text-sm font-bold">대화 진행</span>
-          <span className="text-[10px] font-normal opacity-70">{roundsLeft === 1 ? "마지막 · 끝나면 투표" : `한 줄씩 · 토론 ${roundsLeft}회 남음`}</span>
+          <span className="text-[10px] font-normal opacity-70">나도 참여 · 시간 1회</span>
         </Button>
         <Button className="h-auto flex-col gap-0 py-1.5" disabled={busy} onClick={onStartVote}>
           <span className="text-sm font-bold">투표 시작</span>
