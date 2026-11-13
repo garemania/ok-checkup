@@ -1,6 +1,6 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, fixSelfReference, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -323,6 +323,10 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
   if (issues.length) {
     const again = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[다시 쓰기] 방금 쓴 답변 "${spoken.text}"에는 문제가 있습니다:\n- ${issues.join("\n- ")}\n직전 발언과 [지금까지 일어난 일]에 맞게 다시 쓰세요.`, 200);
     spoken = parseSpoken(clean(again, p.name));
+  }
+  // 다시 써도 자기 이름으로 자기를 부르면 1인칭으로 직접 바꾼다
+  if (speaksOfSelf(spoken.text, p.name)) {
+    spoken = { ...spoken, text: fixSelfReference(spoken.text, p.name, /(반말|털털|가벼운|단호|평어)/.test(p.speech)) };
   }
   return spoken;
 }

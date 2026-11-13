@@ -1204,3 +1204,26 @@ describe("self reference with honorific and particle", () => {
     expect(speaksOfSelf("민재님 말도 맞는데요", "하은")).toBe(false);
   });
 });
+
+describe("never refer to yourself by your own name", () => {
+  it("rewrites leftover self names into first person, matching the speech style", async () => {
+    const { fixSelfReference, speaksOfSelf } = await import("./context");
+    const t = fixSelfReference("지후가 말한 것처럼 태오한테 되묻는 것도 같이 봐야지.", "태오", true);
+    expect(t).toBe("지후가 말한 것처럼 나한테 되묻는 것도 같이 봐야지.");
+    expect(speaksOfSelf("지후가 말한 것처럼 태오한테 되묻는 것도", "태오")).toBe(true);
+    expect(fixSelfReference("도윤님도 하은님을 찍자고 하니까 걸려요.", "하은", false)).toBe("도윤님도 저를 찍자고 하니까 걸려요.");
+    expect(fixSelfReference("서연이 시민이라는 말은 들었는데요", "서연", false)).toBe("제가 시민이라는 말은 들었는데요");
+    expect(fixSelfReference("저 서연은 시민이에요", "서연", false)).toBe("저 서연은 시민이에요");
+  });
+
+  it("applies the fix when the model keeps using its own name", async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[suspicious] 지후가 말한 것처럼 태오한테 되묻는 것도 봐야지." }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      const said = await ai.speak(s, s.players[7]);
+      expect(said.text).toBe("지후가 말한 것처럼 나한테 되묻는 것도 봐야지.");
+    } finally { globalThis.fetch = orig; }
+  });
+});

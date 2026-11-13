@@ -528,3 +528,19 @@ export function isVague(s: GameState, speaker: number, text: string): boolean {
   const hasReason = /(때문|이유|근거|왜냐|라서|해서|거든|투표|주장|보고|모순)/.test(text);
   return !(namesSomeone && hasReason);
 }
+
+/**
+ * 자기 이름으로 자기를 부른 부분을 1인칭으로 바꾼다 (다시 쓰기 후에도 남아 있을 때의 마지막 안전장치).
+ * "태오한테" -> "나한테", "하은님을" -> "저를", "지후가" -> "내가/제가"
+ */
+export function fixSelfReference(text: string, name: string, informal: boolean): string {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const I = informal ? { base: "나", subj: "내가", top: "나는", obj: "나를", gen: "내", also: "나도", to: "나한테", with: "나랑" }
+                     : { base: "저", subj: "제가", top: "저는", obj: "저를", gen: "제", also: "저도", to: "저한테", with: "저랑" };
+  const map: Record<string, string> = {
+    "": I.base, 이: I.subj, 가: I.subj, 이가: I.subj, 은: I.top, 는: I.top, 이는: I.top, 을: I.obj, 를: I.obj, 이를: I.obj,
+    의: I.gen, 도: I.also, 이도: I.also, 에게: I.to, 한테: I.to, 이한테: I.to, 께: I.to, 랑: I.with, 이랑: I.with, 과: I.with, 와: I.with,
+  };
+  const re = new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?:님|씨)?(이가|이는|이를|이도|이한테|이랑|이|가|은|는|을|를|의|도|에게|한테|께|랑|과|와)?(?![가-힣])`, "g");
+  return text.replace(re, (_m, particle: string | undefined) => map[particle ?? ""] ?? I.base);
+}
