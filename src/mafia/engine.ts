@@ -46,6 +46,7 @@ export function createGame(nickname: string): GameState {
     trialStage: null,
     actionsUsed: 0,
     autoUsed: 0,
+    watchUsed: 0,
     lastNightResult: "",
     nextMsgId: 1,
   };

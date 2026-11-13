@@ -88,7 +88,7 @@ const Mafia = () => {
           })}
         </section>
 
-        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} onNext={g.advance} />
+        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} watching={g.watching} onNext={g.advance} />
 
         <footer className="rounded-2xl border border-border bg-card">
           {target !== null && (state.phase === "night" || state.phase === "vote") && (
@@ -98,6 +98,9 @@ const Mafia = () => {
             state={state}
             busy={g.busy}
             waiting={g.waiting}
+            watching={g.watching}
+            onWatch={g.runWatch}
+            onStopWatch={g.stopWatch}
             awaitingHuman={g.awaitingHuman}
             target={target}
             setTarget={setTarget}

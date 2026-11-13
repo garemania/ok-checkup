@@ -10,11 +10,12 @@ interface Props {
   state: GameState;
   speaking: number | null; // 대사를 생각 중인 캐릭터
   waiting: boolean; // 사용자가 "다음"을 누르길 기다리는 중
+  watching?: boolean; // 지켜보기 중 (자동으로 넘어감)
   onNext: () => void;
 }
 
 /** 현재 대사를 한 컷으로 보여주는 무대. 누르면 다음 대사로 넘어간다. */
-export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
+export function SpeakerStage({ state, speaking, waiting, watching, onNext }: Props) {
   const last = state.log[state.log.length - 1];
   const thinking = speaking !== null ? state.players[speaking] : null;
 
@@ -74,6 +75,8 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
               <FaceArt look={thinking.look} hue={thinking.color} emotion="neutral" className="h-6 w-6 rounded" />
               <span className="truncate">{thinking.name}님이 말하는 중<span className="animate-pulse">...</span></span>
             </>
+          ) : watching ? (
+            <span className="truncate">지켜보는 중 · 자동으로 넘어갑니다 (누르면 바로 다음)</span>
           ) : state.phase === "night" ? (
             <><Moon className="h-4 w-4" />밤입니다</>
           ) : (
