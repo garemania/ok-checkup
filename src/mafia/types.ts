@@ -35,6 +35,13 @@ export interface ChatMsg {
   from: number | "system";
   text: string;
   emotion?: Emotion;
+  meaning?: Meaning; // 발언의 구조적 해석 (직업 주장, 조사 보고)
+}
+
+export interface Meaning {
+  claim?: Role;
+  reports?: { target: number; result: "clean" | "mafia" }[];
+  summary?: string;
 }
 
 export interface WhisperMsg {

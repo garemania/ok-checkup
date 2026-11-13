@@ -374,8 +374,8 @@ describe("rules awareness", () => {
     s = addMsg(s, 0, "저는 경찰입니다. 조사해 보니 서연님은 마피아가 아닙니다.");
     s = addMsg(s, 3, "저는 경찰입니다. 조사해 보니 태오님은 마피아입니다.");
     const r = detectReports(s);
-    expect(r).toContainEqual({ by: 0, target: 1, result: "clean" });
-    expect(r).toContainEqual({ by: 3, target: 7, result: "mafia" });
+    expect(r).toContainEqual(expect.objectContaining({ by: 0, target: 1, result: "clean" }));
+    expect(r).toContainEqual(expect.objectContaining({ by: 3, target: 7, result: "mafia" }));
     const f = factsBlock(s);
     expect(f).toContain("서연을(를) 조사했다며 \"마피아 아님(시민 쪽)\"");
     expect(f).toContain("조사 보고");
@@ -481,4 +481,67 @@ describe("typo tolerance and first-night rule", () => {
       expect(system).toContain("기록에 없는 발언");
     } finally { globalThis.fetch = orig; }
   });
+});
+
+describe("free-form police reports", () => {
+  const players = createGame("나").players;
+  const rep = async (text: string, policeBefore = false) => {
+    const { interpretByRules } = await import("./context");
+    return interpretByRules(text, players, 0, policeBefore).reports ?? [];
+  };
+  it("understands natural phrasings", async () => {
+    expect(await rep("서연 조사했는데 마피아임")).toEqual([{ target: 1, result: "mafia" }]);
+    expect(await rep("조사해보니 도윤 시민")).toEqual([{ target: 2, result: "clean" }]);
+    expect(await rep("나 경찰임. 마피아는 태오")).toEqual([{ target: 7, result: "mafia" }]);
+    expect(await rep("서연=시민 확인함")).toEqual([{ target: 1, result: "clean" }]);
+    expect(await rep("나 경창인데 서현 마피아야")).toEqual([{ target: 1, result: "mafia" }]);
+    expect(await rep("조사 결과 서연은 마피아 아님, 지후는 마피아")).toEqual([
+      { target: 1, result: "clean" },
+      { target: 4, result: "mafia" },
+    ]);
+  });
+  it("uses an earlier police claim as context, but ignores plain suspicion", async () => {
+    expect(await rep("하은은 마피아 아님", true)).toEqual([{ target: 3, result: "clean" }]);
+    expect(await rep("하은은 마피아 아님")).toEqual([]);
+    expect(await rep("도윤님, 서연이 시민 연기하는 거 같은데요")).toEqual([]);
+  });
+  it("links a report to an earlier police claim across messages and tells AIs not to ask again", async () => {
+    const { detectReports, factsBlock } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 0, "나 경찰임");
+    s = addMsg(s, 0, "서연 마피아야");
+    expect(detectReports(s)).toContainEqual({ by: 0, target: 1, result: "mafia", day: 1 });
+    expect(factsBlock(s)).toContain("다시 묻지 말 것");
+  });
+  it("a stored LLM interpretation takes priority and shows in the transcript", async () => {
+    const { detectReports, transcriptFor } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 0, "ㅅㅇ 그거임 ㅇㅇ");
+    s = { ...s, log: s.log.map((m) => ({ ...m, meaning: { claim: "police" as const, reports: [{ target: 1, result: "mafia" as const }], summary: "경찰 주장, 서연=마피아 보고" } })) };
+    expect(detectReports(s)).toContainEqual({ by: 0, target: 1, result: "mafia", day: 1 });
+    expect(transcriptFor(s, s.players[2])).toContain("[해석: 경찰 주장, 서연=마피아 보고]");
+  });
+  it("parses the model's interpretation and drops invalid targets", async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"claim":"경찰","reports":[{"target":1,"result":"mafia"},{"target":99,"result":"clean"}],"summary":"경찰 주장, 서연 마피아"}' }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const m = await ai.interpret(createGame("나"), "서연 조사함 마피아");
+      expect(m).toEqual({ claim: "police", reports: [{ target: 1, result: "mafia" }], summary: "경찰 주장, 서연 마피아" });
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("offline variety", () => {
+  it("does not repeat a line that was just said when alternatives exist", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    let s = createGame("나");
+    const hint = "[조사보고:1:mafia] 플레이어가 경찰이라며 보고했습니다.";
+    const observers = s.players.filter((p) => !p.isHuman && p.id !== 1 && p.role !== "police");
+    const first = await ai.speak(s, observers[0], hint);
+    s = addMsg(s, observers[0].id, first.text);
+    const second = await ai.speak(s, observers[1], hint);
+    expect(second.text).not.toBe(first.text);
+  }, 30000);
 });

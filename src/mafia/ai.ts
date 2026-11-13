@@ -3,7 +3,7 @@ import { factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
-import type { Emotion, GameState, Player, Settings } from "./types";
+import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
 
 export interface Spoken { text: string; emotion: Emotion }
 
@@ -138,7 +138,10 @@ const RULEBOOK = `[게임 규칙 전체]
  - 당신이 진짜 경찰인데 누가 경찰을 주장하면: 그 사람은 가짜다. 즉시 반박하고 필요하면 조사 결과를 공개한다.
  - 당신이 마피아라면: 자신이 "마피아 아님"으로 보고되었을 때 상대가 진짜 경찰일 리 없다는 것을 알지만, 연기를 위해 그 보고를 받아들이거나 "가짜 경찰"이라고 몰아붙이는 것 중 유리한 쪽을 고른다.
  - 의심스러운 사람은 의심해도 된다. 단, 이유(모순되는 말, 투표 기록, 이미 공개된 직업, 주장 간의 충돌)를 말한다. 믿을 때도 근거를 말한다.
- - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.`;
+ - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.
+ - [핵심 사실]이나 기록에 이미 나온 조사 보고(대상과 결과)를 두고 "누구를 조사했냐", "결과가 뭐냐"고 다시 묻지 않는다. 그 보고를 사실로 받아들일지 거짓으로 볼지를 판단해 반응한다.
+ - "언제 조사했냐"는 따질 필요가 없다. 경찰은 매 밤 한 명씩 조사하므로 보고된 조사는 지난밤(들) 중 하나에 한 것이다. 조사 횟수가 지난 밤의 수보다 많을 때만 모순이다.
+ - 플레이어가 "말했잖아", "아까 말했지" 등으로 이전 발언을 가리키면 기록에서 그 발언을 찾아 이어서 이해한다.`;
 
 function privateKnowledge(s: GameState, p: Player): string {
   const lines: string[] = [`당신의 직업: ${ROLE_LABEL[p.role]}`];
@@ -250,6 +253,8 @@ export interface AI {
   vote(s: GameState, p: Player): Promise<number | null>;
   nightTarget(s: GameState, p: Player, kind: "kill" | "protect" | "investigate"): Promise<number>;
   whisper(s: GameState, p: Player, userText: string): Promise<Spoken>;
+  /** 사람 플레이어의 자유 발언을 직업 주장/조사 보고로 해석 (실패하면 null) */
+  interpret(s: GameState, text: string): Promise<Meaning | null>;
   /** 최후 찬반 투표: true = 처형에 찬성 */
   verdict(s: GameState, p: Player, accused: number): Promise<boolean>;
 }
@@ -303,6 +308,34 @@ ${EMOTION_RULE}`;
         if (r === null) throw new Error("target parse: null");
         return r;
       }, () => mock.nightTarget(s, p, kind)),
+    interpret: async (s, text) => {
+      try {
+        const me = s.players[HUMAN_ID];
+        const names = s.players.filter((x) => !x.isHuman).map((x) => `${x.id}:${x.name}`).join(", ");
+        const sys = `당신은 마피아 게임의 대화 해석기입니다. 사람 플레이어의 발언 하나를 읽고, 그 안에 담긴 "직업 주장"과 "경찰 조사 보고"를 구조화합니다.
+- 오타, 띄어쓰기 오류, 줄임말, 반말을 너그럽게 문맥으로 해석합니다.
+- 직업 주장: 자기 직업을 밝히는 말(예: "나 경찰임", "저 의사예요").
+- 조사 보고: 누군가를 조사했더니 마피아다/마피아가 아니다(시민이다)라는 말. 예: "서연 조사했는데 마피아임" -> 서연=mafia, "조사해보니 도윤 시민" -> 도윤=clean, "하은은 마피아 아님" -> 하은=clean.
+- 이전 기록에서 이미 경찰을 주장한 사람이 "X 마피아야"라고 말하면 조사 보고로 봅니다.
+- 해당 내용이 없으면 claim은 null, reports는 빈 배열입니다. 추측으로 만들어 내지 마세요.`;
+        const user = `[이전 기록]\n${transcriptFor(s, me, 20)}\n\n[해석할 플레이어 발언] "${text}"\n[후보(id:이름)] ${names}\nJSON 한 줄만 출력: {"claim": null 또는 "경찰"|"의사"|"군인"|"마피아"|"시민", "reports": [{"target": id, "result": "mafia" 또는 "clean"}], "summary": "한 줄 해석"}`;
+        const t = await callLLM(settings, sys, user, 300);
+        const m = t.match(/\{[\s\S]*\}/);
+        if (!m) return null;
+        const j = JSON.parse(m[0]);
+        const roleBy: Record<string, Role> = { 경찰: "police", 의사: "doctor", 군인: "soldier", 마피아: "mafia", 시민: "citizen" };
+        const reports = (Array.isArray(j.reports) ? j.reports : [])
+          .map((r: { target: unknown; result: unknown }) => ({ target: Number(r.target), result: r.result === "mafia" ? "mafia" : "clean" }) as const)
+          .filter((r: { target: number }) => Number.isInteger(r.target) && r.target > 0 && r.target < s.players.length);
+        return {
+          claim: typeof j.claim === "string" ? roleBy[j.claim] : undefined,
+          reports: reports.length ? reports : undefined,
+          summary: typeof j.summary === "string" && j.summary.trim() ? j.summary.trim().slice(0, 120) : undefined,
+        };
+      } catch {
+        return null; // 해석은 보조 기능이라 실패해도 규칙 기반 해석으로 대체
+      }
+    },
     verdict: (s, p, accused) =>
       safe(async () => {
         const task = `${s.players[accused].name}에 대한 최종 찬반 투표입니다. 처형에 찬성하면 {"execute": true}, 반대하면 {"execute": false} JSON 한 줄만 출력하세요.`;
@@ -506,12 +539,16 @@ function makeMockAI(): AI {
   // 오프라인 AI도 대사 내용에 맞춰 표정을 붙인다
   return {
     speak: async (s, p, hint) => {
-      const text = await raw.speak(s, p, hint);
+      // 최근에 누가 이미 한 말과 똑같은 문장은 피한다 (몇 번 다시 고른다)
+      const recent = new Set(s.log.slice(-6).map((m) => m.text));
+      let text = await raw.speak(s, p, hint);
+      for (let i = 0; i < 4 && recent.has(text); i++) text = await raw.speak(s, p, hint);
       return { text, emotion: detectEmotion(text) };
     },
     vote: raw.vote,
     nightTarget: raw.nightTarget,
     verdict: raw.verdict,
+    interpret: async () => null, // 오프라인에서는 규칙 기반 해석만 사용
     whisper: async (s, p, t) => {
       const text = await raw.whisper(s, p, t);
       return { text, emotion: detectEmotion(text) };
