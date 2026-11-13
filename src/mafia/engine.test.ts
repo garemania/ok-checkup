@@ -758,3 +758,244 @@ describe("conversation director", () => {
     expect(mentions).toBeLessThanOrEqual(1);
   }, 30000);
 });
+
+describe("auto-speech for the player, directed talk, in-world wording", () => {
+  it("speaks for the player when addressed, only if allowed", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 1, "나님, 아까 한 말 무슨 뜻이에요?", "day");
+    const on = nextTurn(s, Math.random, { allowHuman: true })!;
+    expect(on.player.id).toBe(0);
+    expect(on.proxy).toBe(true);
+    expect(on.hint).toContain("[대리]");
+    expect(on.hint).toContain("직업, 조사 결과");
+    for (let i = 0; i < 20; i++) expect(nextTurn(s, Math.random, { allowHuman: false })!.player.id).not.toBe(0);
+  });
+
+  it("sometimes lets the player chime in during free talk", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 1, "다들 어떻게 봐요", "day");
+    s = addMsg(s, 2, "음 글쎄", "day");
+    let human = 0;
+    for (let i = 0; i < 200; i++) if (nextTurn(s, Math.random, { allowHuman: true })!.player.id === 0) human++;
+    expect(human).toBeGreaterThan(5);
+  });
+
+  it("offline proxy lines never reveal role or reports", async () => {
+    const { interpretByRules } = await import("./context");
+    const { proxyHint } = await import("./director");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    let s = createGame("나");
+    s = { ...s, day: 3, players: s.players.map((p) => (p.id === 0 ? { ...p, role: "police" as const } : p)), policeLog: { 0: [{ target: 1, isMafia: true, day: 1 }] } };
+    for (let i = 0; i < 8; i++) {
+      const said = await ai.speak(s, s.players[0], proxyHint(s, "[반응:서연] 직전 발언에 반응하세요."));
+      const m = interpretByRules(said.text, s.players, 0);
+      expect(m.claim).toBeUndefined();
+      expect(m.reports).toBeUndefined();
+    }
+  }, 30000);
+
+  it("flags out-of-world words and keeps them out of the prompt headers", async () => {
+    const { ruleViolations } = await import("./context");
+    expect(ruleViolations("서연님, 3일차 기록 보자는 건 좋은데")).toHaveLength(1);
+    expect(ruleViolations("어제 투표에서 서연님이 태오를 찍었죠")).toHaveLength(0);
+    const orig = globalThis.fetch;
+    let user = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      user = JSON.parse(init.body as string).contents[0].parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[neutral] 네." }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      await ai.speak(createGame("나"), createGame("나").players[1]);
+      expect(user).not.toContain("[공개 대화 기록]");
+      expect(user).not.toContain("상황판");
+      expect(user).toContain("[지금까지 일어난 일]");
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("no circular conversations", () => {
+  it("breaks a two-person ping-pong by bringing in someone else", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 7, "하은, 서연이 3일차 얘기 피하는 거 이상하지 않아?", "day");
+    s = addMsg(s, 3, "태오님, 저는 아직 판단이 조심스러워요.", "day");
+    s = addMsg(s, 7, "하은, 그래도 서연 얘기는 넘기기 어렵잖아.", "day");
+    for (let i = 0; i < 20; i++) {
+      const t = nextTurn(s, Math.random, { allowHuman: true })!;
+      expect([7, 3]).not.toContain(t.player.id);
+      expect(t.hint).toContain("[전환]");
+    }
+  });
+
+  it("asks to move on when one person's topic keeps coming up", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 2, "서연이 수상해", "day");
+    s = addMsg(s, 4, "서연 말은 좀 이상했지", "day");
+    s = addMsg(s, 6, "서연은 아직 모르겠어요", "day");
+    s = addMsg(s, 5, "음", "day");
+    expect(nextTurn(s)!.hint).toContain("서연 이야기는 이미 충분히");
+  });
+
+  it("measures near-duplicate lines", async () => {
+    const { similarity, isRepetitive } = await import("./context");
+    expect(similarity("서연 얘기를 계속 피하는 건 넘기기 어렵잖아", "서연이 얘기를 계속 피하는 건 그냥 넘기기 어렵잖아")).toBeGreaterThan(0.45);
+    expect(similarity("오늘은 민재 쪽을 보자", "서연 얘기를 계속 피하는 건 넘기기 어렵잖아")).toBeLessThan(0.2);
+    let s = createGame("나");
+    s = addMsg(s, 7, "서연이 3일차 얘기만 계속 피하는 건 그냥 넘기기 어렵잖아.");
+    expect(isRepetitive(s, 3, "서연이 3일차 얘기를 계속 피하는 건 넘기기 어렵잖아요.")).toBe(true);
+    expect(isRepetitive(s, 3, "그 얘기는 이쯤 하고 민재님도 보고 싶어요.")).toBe(false);
+  });
+
+  it("rewrites a line that repeats what was just said", async () => {
+    const orig = globalThis.fetch;
+    const replies = ["[suspicious] 서연이 3일차 얘기를 계속 피하는 건 넘기기 어렵잖아요.", "[neutral] 그 얘기는 충분히 했으니 민재님 생각도 듣고 싶어요."];
+    let n = 0;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: replies[Math.min(n++, 1)] }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      let s = createGame("나");
+      s = addMsg(s, 7, "서연이 3일차 얘기만 계속 피하는 건 그냥 넘기기 어렵잖아.");
+      const said = await ai.speak(s, s.players[3]);
+      expect(n).toBe(2);
+      expect(said.text).toBe("그 얘기는 충분히 했으니 민재님 생각도 듣고 싶어요.");
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("trust is not an accusation", () => {
+  it("does not make the trusted person defend themselves", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 6, "하은님은 시민 쪽으로 보고 있어요. 의심은 다른 쪽에 두겠습니다.", "day");
+    for (let i = 0; i < 20; i++) expect(nextTurn(s)!.reason).not.toBe("accused");
+  });
+});
+
+describe("doctor reports are not police reports", () => {
+  const players = createGame("나").players;
+  it("reads 'I protected X' as a doctor save, not an investigation", async () => {
+    const { interpretByRules } = await import("./context");
+    const m = interpretByRules("나 의사인데 서연 보호했어, 마피아 아닌거 확인함", players, 0);
+    expect(m.claim).toBe("doctor");
+    expect(m.saves).toEqual([{ target: 1 }]);
+    expect(m.reports).toBeUndefined();
+    const later = interpretByRules("어젯밤 도윤 살렸어. 그러니까 도윤은 마피아 아님", players, 0, false, true);
+    expect(later.saves).toEqual([{ target: 2 }]);
+    expect(later.reports).toBeUndefined();
+    // 경찰 보고는 그대로
+    expect(interpretByRules("조사해보니 도윤 시민", players, 0).reports).toEqual([{ target: 2, result: "clean" }]);
+  });
+
+  it("explains the doctor's deduction when the morning confirms a save", async () => {
+    const { factsBlock, deductions } = await import("./context");
+    let s = { ...createGame("나"), day: 2 };
+    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다.", "day");
+    s = addMsg(s, 0, "저는 의사예요. 어젯밤 서연 보호했어요.", "day");
+    expect(factsBlock(s)).toContain("경찰 조사가 아님");
+    expect(deductions(s).join(" ")).toContain("의사의 추론이지 경찰의 조사가 아니다");
+  });
+
+  it("records protection and mafia attack results", async () => {
+    const { resolveNight } = await import("./engine");
+    const s = { ...createGame("나"), day: 2 };
+    const doc = s.players.find((p) => p.role === "doctor")!;
+    const target = s.players.find((p) => p.role === "citizen")!;
+    const r = resolveNight(s, { kill: target.id, protect: target.id, protector: doc.id, investigate: null });
+    expect(r.state.doctorLog[doc.id]).toEqual([{ day: 2, target: target.id, saved: true }]);
+    expect(r.state.mafiaLog).toEqual([{ day: 2, target: target.id, result: "saved" }]);
+  });
+
+  it("offline AIs: the real doctor objects, the saved person thanks, nobody asks how the 'investigation' was done", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    const doctor = s.players.find((p) => p.role === "doctor" && !p.isHuman);
+    const saved = s.players.find((p) => !p.isHuman && p.role !== "mafia" && p.role !== "doctor")!;
+    const hint = `[의사보고:${saved.id}:saved] 플레이어가 의사라며 보호했다고 말했습니다.`;
+    if (doctor) expect((await ai.speak(s, doctor, hint)).text).toMatch(/의사는 (나|저)/);
+    expect((await ai.speak(s, saved, hint)).text).toMatch(/고마|감사|덕분/);
+    const observer = s.players.find((p) => !p.isHuman && p.id !== saved.id && p.role !== "doctor")!;
+    for (let i = 0; i < 4; i++) expect((await ai.speak(s, observer, hint)).text).not.toMatch(/조사|경찰이/);
+  }, 30000);
+});
+
+describe("role-based reasoning notes", () => {
+  it("police remember their results and spot a fake police claim", async () => {
+    const { reasoningNotes } = await import("./context");
+    let s = createGame("나");
+    const police = s.players.find((p) => p.role === "police" && !p.isHuman) ?? s.players.find((p) => p.role === "police")!;
+    const other = s.players.find((p) => p.id !== police.id && !p.isHuman)!;
+    s = { ...s, policeLog: { [police.id]: [{ target: other.id, isMafia: false, day: 1 }] } };
+    const faker = s.players.find((p) => p.id !== police.id && p.id !== other.id && !p.isHuman)!;
+    s = addMsg(s, faker.id, "제가 경찰입니다.");
+    const notes = reasoningNotes(s, s.players[police.id]).join(" ");
+    expect(notes).toContain(`${other.name}은(는) 마피아가 아니다(확실)`);
+    expect(notes).toContain(`${faker.name}은(는) 경찰을 주장하지만 진짜 경찰은 나다`);
+  });
+
+  it("doctor and mafia know what happened at night", async () => {
+    const { reasoningNotes } = await import("./context");
+    let s = { ...createGame("나"), day: 2 };
+    const doc = s.players.find((p) => p.role === "doctor")!;
+    const mafia = s.players.find((p) => p.role === "mafia")!;
+    const t = s.players.find((p) => p.role === "citizen")!;
+    s = { ...s, doctorLog: { [doc.id]: [{ day: 2, target: t.id, saved: true }] }, mafiaLog: [{ day: 2, target: t.id, result: "saved" }] };
+    expect(reasoningNotes(s, doc).join(" ")).toContain(`${t.name}은(는) 마피아의 표적이었으니 마피아가 아니다`);
+    expect(reasoningNotes(s, mafia).join(" ")).toContain("의사가 막음");
+  });
+
+  it("the notes reach the model in the system prompt", async () => {
+    const orig = globalThis.fetch;
+    let system = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      system = JSON.parse(init.body as string).systemInstruction.parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[neutral] 네." }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      let s = createGame("나");
+      const police = s.players.find((p) => p.role === "police")!;
+      s = { ...s, policeLog: { [police.id]: [{ target: (police.id % 7) + 1, isMafia: true, day: 1 }] } };
+      await ai.speak(s, s.players[police.id === 0 ? 1 : police.id]);
+      if (police.id !== 0) expect(system).toContain("[당신의 추리 메모");
+      expect(system).toContain("의사의 보호 보고는 경찰 조사가 아니다");
+      expect(system).toContain("추리하며 말하기");
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("goals, hidden roles, abstaining", () => {
+  it("each AI knows its team's goal and that roles are hidden", async () => {
+    const orig = globalThis.fetch;
+    let system = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      system = JSON.parse(init.body as string).systemInstruction.parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"vote": null}' }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      const citizen = s.players.find((p) => !p.isHuman && p.role !== "mafia")!;
+      expect(await ai.vote(s, citizen)).toBeNull();
+      expect(system).toContain("마피아 2명을 모두 찾아 처형해야 승리");
+      expect(system).toContain("마피아끼리만 서로 안다");
+      expect(system).toContain("기권해도 된다");
+      const mafia = s.players.find((p) => !p.isHuman && p.role === "mafia")!;
+      await ai.vote(s, mafia);
+      expect(system).toContain("마피아 수가 시민 팀 수와 같아지면 승리");
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it("offline citizens abstain when there is no real suspect", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    let abstain = 0;
+    for (let i = 0; i < 6; i++) {
+      const s = createGame("나");
+      for (const p of s.players.filter((x) => !x.isHuman && x.role !== "mafia")) if ((await ai.vote(s, p)) === null) abstain++;
+    }
+    expect(abstain).toBeGreaterThan(0);
+  }, 30000);
+});

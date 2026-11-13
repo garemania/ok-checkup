@@ -37,11 +37,13 @@ export interface ChatMsg {
   text: string;
   emotion?: Emotion;
   meaning?: Meaning; // 발언의 구조적 해석 (직업 주장, 조사 보고)
+  auto?: boolean; // 플레이어 대신 자동으로 한 말
 }
 
 export interface Meaning {
   claim?: Role;
   reports?: { target: number; result: "clean" | "mafia" }[];
+  saves?: { target: number }[]; // 의사의 보호 보고 ("○○를 지켰다/살렸다")
   summary?: string;
 }
 
@@ -69,10 +71,13 @@ export interface GameState {
   whispersUsed: number;
   investigations: Investigation[]; // 경찰(누구든) 조사 기록: actor 별로 분리
   policeLog: Record<number, Investigation[]>;
+  doctorLog: Record<number, { day: number; target: number; saved: boolean }[]>;
+  mafiaLog: { day: number; target: number; result: "killed" | "saved" | "shielded" }[]; // 마피아 습격 기록 (마피아만 아는 정보) // 의사별 보호 기록 (saved: 실제로 습격을 막음)
   votes: Record<number, number | null>;
   accused: number | null; // 재판 대상
   trialStage: TrialStage | null;
   actionsUsed: number; // 오늘 사용한 낮 행동 횟수
+  autoUsed: number; // 오늘 플레이어 대신 자동으로 한 말의 수
   lastNightResult: string;
   winner?: "mafia" | "citizen";
   nextMsgId: number;
@@ -87,6 +92,7 @@ export interface Settings {
   baseUrl: string;
   model: string;
   nickname: string;
+  autoSpeak: boolean; // 대화 중 내 캐릭터도 하루 몇 번 자동으로 말하기
 }
 
 export const ROLE_LABEL: Record<Role, string> = {

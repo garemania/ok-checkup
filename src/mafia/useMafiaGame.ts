@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
 import { nextTurn, openerTurn } from "./director";
-import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
-import { detectClaims, interpretByRules, normalizeHuman } from "./context";
+import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
+import { detectClaims, interpretByRules, normalizeHuman, savedOnNight } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
 import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: "https://api.anthropic.com",
   model: "claude-haiku-5-5",
   nickname: "나",
+  autoSpeak: true,
 };
 
 export function loadSettings(): Settings {
@@ -67,7 +68,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     r?.(v);
   };
   // AI들이 대화하는 도중(다음 대기 중) 사용자가 끼어들어 한 말
-  const interruptRef = useRef<string | null>(null);
+  const interruptRef = useRef<{ text: string; to: number | null } | null>(null);
   const advance = useCallback(() => {
     const r = nextResolver.current;
     nextResolver.current = null;
@@ -149,10 +150,11 @@ export function useMafiaGame(onError: (msg: string) => void) {
     const { state: after, result } = resolveNight(ref.current!, {
       kill: k ? k.target : null,
       protect: d ? d.target : null,
+      protector: d ? d.actor : undefined,
       investigate: p ? { actor: p.actor, target: p.target } : null,
     });
     ref.current = after;
-    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0 }));
+    commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }));
     commit((x) => addMsg(x, "system", `${x.day}일차 낮이 밝았습니다. ${result}`, "day"));
     commit(finishIfWon);
     if (ref.current!.phase === "day") {
@@ -207,13 +209,26 @@ export function useMafiaGame(onError: (msg: string) => void) {
     const engine = ai();
     for (let i = 0; i < lines; i++) {
       if (!alivePhaseGuard(id)) return false;
-      const turn = i === 0 && first ? first : nextTurn(ref.current!);
+      const cur = ref.current!;
+      const allowHuman = settings.autoSpeak && cur.autoUsed < MAX_AUTO_SPEAK_PER_DAY;
+      const turn = i === 0 && first ? first : nextTurn(cur, Math.random, { allowHuman });
       if (!turn) break;
       setSpeaking(turn.player.id);
-      const said = await engine.speak(ref.current!, ref.current!.players[turn.player.id], turn.hint);
+      let said = await engine.speak(ref.current!, ref.current!.players[turn.player.id], turn.hint);
       if (!alivePhaseGuard(id)) return false;
+      if (turn.proxy) {
+        // 내 대신 한 말이 직업이나 조사 결과를 밝히면 안전한 오프라인 문장으로 바꾼다
+        const m = interpretByRules(said.text, ref.current!.players, HUMAN_ID);
+        if (m.claim || m.reports) said = await makeAI({ ...settings, mode: "mock" }, () => {}).speak(ref.current!, ref.current!.players[HUMAN_ID], turn.hint);
+      }
       setSpeaking(null);
-      commit((x) => addMsg(x, turn.player.id, said.text, undefined, said.emotion));
+      commit((x) => {
+        const next = addMsg(x, turn.player.id, said.text, undefined, said.emotion);
+        if (!turn.proxy) return next;
+        const log = next.log.slice();
+        log[log.length - 1] = { ...log[log.length - 1], auto: true };
+        return { ...next, log, autoUsed: x.autoUsed + 1 };
+      });
       if (i < lines - 1) {
         await waitNext();
         if (!alivePhaseGuard(id)) return false;
@@ -228,7 +243,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     const t = interruptRef.current;
     if (!t) return false;
     interruptRef.current = null;
-    await humanSpeaks(id, t);
+    await humanSpeaks(id, t.text, t.to);
     return true;
   };
 
@@ -268,6 +283,24 @@ export function useMafiaGame(onError: (msg: string) => void) {
     return items;
   };
 
+  /** 의사의 보호 보고에 대한 반응: 보호받은 사람이 먼저, 다른 두 명이 이어서 (경찰 조사로 취급하지 않는다) */
+  const saveItems = (s0: GameState, target: number) => {
+    const me0 = s0.players[HUMAN_ID].name;
+    const t = s0.players[target];
+    const confirmed = savedOnNight(s0, s0.day);
+    const tag = `[의사보고:${t.id}:${confirmed ? "saved" : "unsaved"}]`;
+    const basis = confirmed
+      ? `오늘 아침 "의사가 누군가를 구해냈다"는 안내가 있었으므로, 이 말이 사실이면 ${t.name}은(는) 마피아의 습격 대상이었고 마피아가 아니다.`
+      : "오늘 아침 습격을 막았다는 안내는 없었으므로, 보호했다는 사실만으로는 마피아가 아니라는 근거가 되지 않는다.";
+    const items: { player: Player; hint: string }[] = [];
+    if (t.alive && !t.isHuman)
+      items.push({ player: t, hint: `${tag} ${me0}가 자신이 의사이며 어젯밤 당신을 보호했다고 말했습니다. ${basis} 이것은 경찰 조사가 아니라 의사의 보고입니다. 당신의 실제 직업에 비추어 짧게 반응하세요.` });
+    aliveAI(s0).filter((p) => p.id !== t.id).sort(() => Math.random() - 0.5).slice(0, 2).forEach((p) =>
+      items.push({ player: p, hint: `${tag} ${me0}가 자신이 의사이며 어젯밤 ${t.name}님을 보호했다고 말했습니다. ${basis} 이것은 경찰 조사가 아니니 "조사를 어떻게 했냐", "경찰이냐"고 묻지 말고, 규칙에 따라 이 말이 그럴듯한지 판단해 짧게 반응하세요. 당신이 진짜 의사라면 즉시 반박하세요.` }),
+    );
+    return items;
+  };
+
   const claimItems = (s0: GameState, role: Role) => {
     const me0 = s0.players[HUMAN_ID].name;
     const label = ROLE_LABEL[role];
@@ -278,20 +311,28 @@ export function useMafiaGame(onError: (msg: string) => void) {
     commit((x) => ({ ...x, log: x.log.map((m) => (m.id === msgId ? { ...m, meaning } : m)) }));
 
   /** 사람 플레이어의 발언을 기록하고, 해석한 뒤, 알맞은 캐릭터들이 반응한다 (busy 상태에서 호출) */
-  const humanSpeaks = async (id: number, text: string): Promise<boolean> => {
+  const humanSpeaks = async (id: number, rawText: string, to: number | null = null): Promise<boolean> => {
+    // 대상을 골라 말하면 이름을 불러 공개적으로 말을 건다 ("서연님, ...")
+    const target = to !== null ? ref.current!.players[to] : null;
+    const text = target && !rawText.includes(target.name) ? `${target.name}님, ${rawText.trim()}` : rawText.trim();
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
     const msgId = ref.current!.nextMsgId - 1;
     // 자유 발언을 직업 주장/조사 보고로 해석해 둔다 (API: LLM 해석, 실패 또는 오프라인: 규칙 기반)
     const llmMeaning = await ai().interpret(ref.current!, text.trim());
     if (!alivePhaseGuard(id)) return false;
     const wasPolice = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) })[HUMAN_ID] === "police";
-    const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice);
+    const prevClaims = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) });
+    const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice, prevClaims[HUMAN_ID] === "doctor");
     if (llmMeaning) setMeaning(msgId, llmMeaning);
     const cur = ref.current!;
     const me0 = cur.players[HUMAN_ID].name;
     const normalized = normalizeHuman(text, cur.players).text;
     let items: { player: Player; hint: string }[];
-    if (meaning.reports?.length) {
+    if (meaning.saves?.length) {
+      items = saveItems(cur, meaning.saves[0].target);
+    } else if (target && target.alive && !target.isHuman && !meaning.reports?.length && !meaning.claim) {
+      items = [{ player: target, hint: `[응답] 플레이어(${me0})가 모두 앞에서 당신에게 직접 말을 걸었습니다: "${text}" 그 말에 직접 답하세요.${meaning.summary ? ` (발언 해석: ${meaning.summary})` : ""}` }];
+    } else if (meaning.reports?.length) {
       const r = meaning.reports[0];
       items = reportItems(cur, r.target, r.result);
     } else if (meaning.claim) {
@@ -308,20 +349,20 @@ export function useMafiaGame(onError: (msg: string) => void) {
     return respond(id, items);
   };
 
-  const sendPublic = async (text: string) => {
+  const sendPublic = async (text: string, to: number | null = null) => {
     const s0 = ref.current;
     if (!s0 || !text.trim() || !s0.players[HUMAN_ID].alive || s0.phase !== "day") return;
     if (busy) {
       // AI들이 대화하는 중 "다음"을 기다리는 동안이면 끼어든다
       if (waiting && !interruptRef.current) {
-        interruptRef.current = text.trim();
+        interruptRef.current = { text: text.trim(), to };
         advance();
       }
       return;
     }
     const id = runId.current;
     setBusy(true);
-    const ok = await humanSpeaks(id, text.trim());
+    const ok = await humanSpeaks(id, text.trim(), to);
     if (!ok) return;
     setSpeaking(null);
     setBusy(false);
@@ -389,7 +430,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   const goNight = () =>
-    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
+    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
 
   /** 최후의 변론 -> 찬반 투표 -> (처형 시) 유언. 중단되면 false */
   const runTrial = async (id: number, accusedId: number): Promise<boolean> => {

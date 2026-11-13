@@ -39,7 +39,7 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
           <div className={cn("relative h-24 w-24 shrink-0 self-start sm:h-32 sm:w-32", loud && "animate-[shake_0.35s_ease-in-out]")}>
             <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg shadow-lg" rough />
             <span className="absolute -bottom-1 left-1 rounded bg-black px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
-              {p.name} · {EMOTION_LABEL[emotion]}
+              {p.name}{last.auto ? " (자동)" : ""} · {EMOTION_LABEL[emotion]}
             </span>
           </div>
           <div className="relative min-h-0 min-w-0 flex-1">

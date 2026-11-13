@@ -26,7 +26,7 @@ function editDistance(a: string, b: string): number {
 const COMMON_WORDS = new Set(["도사", "선생", "사장", "대장", "엄마", "아빠", "형님", "누나", "언니", "오빠", "하느", "하나", "하늘", "서로", "지금", "민간", "유저", "태도", "도움", "오늘", "내일", "어제", "시간", "이유"]);
 
 const FIRST_PERSON = "(?:저는|제가|저|난|나는|내가|나)";
-const CLAIM_END = "(?:입니다|이에요|예요|이야|이다|임|이라고|라고|이고|야|다|돼|되)";
+const CLAIM_END = "(?:입니다|이에요|예요|이야|이다|임|이라고|라고|이고|인데|이니까|이라서|라서|야|다|돼|되)";
 
 /**
  * 사람 플레이어의 말에서 오타를 문맥에 맞게 보정한다.
@@ -97,7 +97,7 @@ export function transcriptFor(s: GameState, viewer: Player, limit = 40): string 
 }
 
 // 1인칭 직업 주장. 어미가 없어도 되지만 "시민을 믿어"(조사)나 "시민 아니야"(부정)는 제외
-const CLAIM_RE = /(?:저는|제가|저|난|나는|내가|나)\s*(경찰|의사|군인|마피아|시민)(?:(?:입니다|이에요|예요|이야|이다|임|이라고|라고|이고|야|다|돼|되)|(?![가-힣])(?!\s*(?:아니|아님)))/;
+const CLAIM_RE = /(?:저는|제가|저|난|나는|내가|나)\s*(경찰|의사|군인|마피아|시민)(?:(?:입니다|이에요|예요|이야|이다|임|이라고|라고|이고|인데|이니까|이라서|라서|야|다|돼|되)|(?![가-힣])(?!\s*(?:아니|아님)))/;
 const ROLE_BY_LABEL: Record<string, Role> = { 경찰: "police", 의사: "doctor", 군인: "soldier", 마피아: "mafia", 시민: "citizen" };
 
 // 조사 보고임을 알려주는 단서
@@ -115,17 +115,32 @@ function verdictOf(window: string): "clean" | "mafia" | null {
  * "서연 조사했는데 마피아임", "조사해보니 서연 마피아", "서연=시민"처럼 자유로운 표현도 인식한다.
  * isPoliceClaimer: 이 화자가 이전에 이미 경찰을 주장했는지
  */
-export function interpretByRules(text: string, players: Player[], speaker: number, isPoliceClaimer = false): Meaning {
+const SAVE_CUE = /(보호|살렸|살려|지켰|지켜|치료)/;
+
+export function interpretByRules(text: string, players: Player[], speaker: number, isPoliceClaimer = false, isDoctorClaimer = false): Meaning {
   const norm = normalizeHuman(text, players).text;
   const hit = norm.match(CLAIM_RE);
   const claim = hit ? ROLE_BY_LABEL[hit[1]] : undefined;
+  const found = players
+    .filter((q) => q.id !== speaker)
+    .map((q) => ({ q, at: norm.indexOf(q.name) }))
+    .filter((x) => x.at >= 0)
+    .sort((x, y) => x.at - y.at);
+
+  // 의사의 보호 보고: "○○ 보호했어", "○○ 살렸다" -> 경찰 조사로 보지 않는다
+  const saves: NonNullable<Meaning["saves"]> = [];
+  const doctorTalk = claim === "doctor" || isDoctorClaimer || (SAVE_CUE.test(norm) && /의사/.test(norm));
+  if (SAVE_CUE.test(norm) && (doctorTalk || claim !== "police")) {
+    found.forEach(({ q, at }, i) => {
+      const end = i + 1 < found.length ? found[i + 1].at : norm.length;
+      const around = norm.slice(Math.max(0, at - 6), Math.min(end, at + q.name.length + 14));
+      if (SAVE_CUE.test(around)) saves.push({ target: q.id });
+    });
+  }
+
   const reports: NonNullable<Meaning["reports"]> = [];
-  if (claim === "police" || isPoliceClaimer || REPORT_CUE.test(norm)) {
-    const found = players
-      .filter((q) => q.id !== speaker)
-      .map((q) => ({ q, at: norm.indexOf(q.name) }))
-      .filter((x) => x.at >= 0)
-      .sort((x, y) => x.at - y.at);
+  const policeTalk = claim === "police" || (isPoliceClaimer && !doctorTalk) || (REPORT_CUE.test(norm) && !saves.length && !doctorTalk);
+  if (policeTalk) {
     found.forEach(({ q, at }, i) => {
       const end = i + 1 < found.length ? found[i + 1].at : norm.length;
       const after = norm.slice(at + q.name.length, Math.min(end, at + q.name.length + 18));
@@ -139,18 +154,26 @@ export function interpretByRules(text: string, players: Player[], speaker: numbe
   }
   const parts: string[] = [];
   if (claim) parts.push(`${ROLE_LABEL[claim]} 주장`);
+  saves.forEach((r) => parts.push(`의사로서 ${players[r.target].name}을(를) 보호했다고 말함(경찰 조사가 아님)`));
   reports.forEach((r) => parts.push(`${players[r.target].name}을(를) 조사해 "${r.result === "mafia" ? "마피아" : "마피아 아님"}"으로 보고`));
-  return { claim, reports: reports.length ? reports : undefined, summary: parts.length ? parts.join(", ") : undefined };
+  return {
+    claim,
+    reports: reports.length ? reports : undefined,
+    saves: saves.length ? saves : undefined,
+    summary: parts.length ? parts.join(", ") : undefined,
+  };
 }
 
 /** 저장된 해석(LLM 또는 행동)이 있으면 그것을, 없으면 규칙 기반 해석을 쓴다 */
 function meaningsInOrder(s: GameState): { m: ChatMsg; meaning: Meaning }[] {
   const policeClaimers = new Set<number>();
+  const doctorClaimers = new Set<number>();
   const out: { m: ChatMsg; meaning: Meaning }[] = [];
   for (const m of s.log) {
     if (m.from === "system") continue;
-    const meaning = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from));
+    const meaning = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from), doctorClaimers.has(m.from));
     if (meaning.claim === "police") policeClaimers.add(m.from);
+    if (meaning.claim === "doctor") doctorClaimers.add(m.from);
     out.push({ m, meaning });
   }
   return out;
@@ -175,6 +198,20 @@ export function detectReports(s: GameState): Report[] {
     }
   }
   return [...map.values()];
+}
+
+export interface SaveClaim { by: number; target: number; day: number }
+
+/** 의사 보호 보고 목록 (발언한 날 기준) */
+export function detectSaves(s: GameState): SaveClaim[] {
+  const out: SaveClaim[] = [];
+  for (const { m, meaning } of meaningsInOrder(s)) for (const r of meaning.saves ?? []) out.push({ by: m.from as number, target: r.target, day: m.day });
+  return out;
+}
+
+/** N일차 아침에 "의사가 누군가를 구해냈다"는 안내가 있었는지 (= N일차 밤에 의사가 습격을 막음) */
+export function savedOnNight(s: GameState, day: number): boolean {
+  return s.log.some((m) => m.from === "system" && m.day === day && /구해냈/.test(m.text));
 }
 
 /** 발언 하나의 해석 요약 (AI에게 보여주는 기록용) */
@@ -209,6 +246,14 @@ export function factsBlock(s: GameState): string {
         .join(" / ")}`,
     );
 
+  const saves = detectSaves(s);
+  if (saves.length)
+    lines.push(
+      `의사 보호 보고(경찰 조사가 아님, 조사 방법을 묻지 말 것): ${saves
+        .map((v) => `${s.players[v.by].name}이(가) 의사로서 ${s.players[v.target].name}을(를) 보호했다고 말함(${v.day}일차 발언)`)
+        .join(" / ")}`,
+    );
+
   for (const m of s.log) {
     if (m.from !== "system") continue;
     const t = m.text;
@@ -224,7 +269,7 @@ export function factsBlock(s: GameState): string {
   }
 
   const ded = deductions(s);
-  if (ded.length) lines.push(`[공개 정보로 확실히 말할 수 있는 것]\n- ${ded.join("\n- ")}`);
+  if (ded.length) lines.push(`[공개된 사실만으로 확실한 것]\n- ${ded.join("\n- ")}`);
   return lines.join("\n");
 }
 
@@ -257,6 +302,16 @@ export function deductions(s: GameState): string[] {
       const c = Number(idStr);
       if (c !== p.id && role === p.role) out.push(`진짜 ${ROLE_LABEL[p.role]}였던 ${p.name}이(가) 처형으로 공개되었으므로, 같은 직업을 주장한 ${s.players[c].name}은(는) 가짜다.`);
     }
+  }
+  const doctors = Object.entries(claims).filter(([, r]) => r === "doctor").map(([id]) => Number(id)).filter((id) => s.players[id].alive);
+  if (doctors.length >= 2) out.push(`의사를 주장하는 생존자가 ${doctors.map((id) => s.players[id].name).join(", ")} 둘 이상이다. 진짜 의사는 1명이므로 적어도 한 명은 가짜다.`);
+  for (const v of detectSaves(s)) {
+    const by = s.players[v.by].name;
+    const t = s.players[v.target].name;
+    if (savedOnNight(s, v.day))
+      out.push(`${by}은(는) ${t}을(를) 보호했다고 했고, ${v.day}일차 아침에 실제로 "의사가 누군가를 구해냈다"는 안내가 있었다. ${by}의 의사 주장이 사실이라면 ${t}은(는) 마피아의 습격 대상이었으므로 마피아가 아니다(마피아는 자기편을 습격하지 않는다). 이것은 의사의 추론이지 경찰의 조사가 아니다.`);
+    else
+      out.push(`${by}은(는) ${t}을(를) 보호했다고 했지만, ${v.day}일차 아침에 습격을 막았다는 안내는 없었다. 보호했다는 사실만으로는 ${t}이(가) 마피아가 아니라는 근거가 되지 않는다.`);
   }
   // 마피아 공개 수
   const mafiaDead = s.players.filter((p) => p.revealed && p.role === "mafia").length;
@@ -326,5 +381,77 @@ export function ruleViolations(text: string): string[] {
     out.push("첫 밤에는 의사의 보호 행동 자체가 없습니다. 첫 밤의 보호를 언급하지 마세요.");
   if (firstNight.test(text) && /조사/.test(text) && /(불가|못\s*해|못\s*하|할\s*수\s*없|안\s*돼|안\s*되)/.test(text))
     out.push("첫 밤에도 경찰 조사는 가능합니다. 조사가 불가능하다고 말하지 마세요.");
+  if (/(기록|로그|상황판|핵심\s*사실|진행자|시스템|프롬프트)/.test(text))
+    out.push('"기록", "상황판" 같은 게임 밖의 말을 쓰지 마세요. 게임 속 사람처럼 "어제 투표에서", "아까 ○○가 한 말"처럼 말하세요.');
   return out;
+}
+
+const bigrams = (t: string) => {
+  const c = t.replace(/[^가-힣a-zA-Z0-9]/g, "");
+  const set = new Set<string>();
+  for (let i = 0; i < c.length - 1; i++) set.add(c.slice(i, i + 2));
+  return set;
+};
+
+/** 두 문장이 얼마나 비슷한지 (글자 두 개 묶음 기준, 0~1) */
+export function similarity(a: string, b: string): number {
+  const A = bigrams(a);
+  const B = bigrams(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  A.forEach((x) => { if (B.has(x)) inter++; });
+  return inter / (A.size + B.size - inter);
+}
+
+/** 방금 나온 말(최근 4줄)이나 자기가 최근에 한 말(3줄)과 거의 같은지 */
+export function isRepetitive(s: GameState, speaker: number, text: string): boolean {
+  const talk = s.log.filter((m) => m.from !== "system");
+  const mine = talk.filter((m) => m.from === speaker).slice(-3).map((m) => m.text);
+  const recent = talk.slice(-4).map((m) => m.text);
+  return [...mine, ...recent].some((t) => similarity(t, text) >= 0.45);
+}
+
+/**
+ * 직업별 추리 메모: 이 AI가 자기 직업으로 알 수 있는 확실한 사실과 그로부터의 추론.
+ * (공개되지 않은 정보이므로 그대로 말할지는 각자 전략적으로 판단)
+ */
+export function reasoningNotes(s: GameState, p: Player): string[] {
+  const notes: string[] = [];
+  const claims = detectClaims(s);
+  const name = (id: number) => s.players[id].name;
+  const others = (role: Role) => Object.entries(claims).filter(([id, r]) => r === role && Number(id) !== p.id).map(([id]) => Number(id));
+
+  if (p.role === "police") {
+    for (const r of s.policeLog[p.id] ?? []) notes.push(`내가 ${r.day}일차 밤에 조사한 ${name(r.target)}은(는) ${r.isMafia ? "마피아다(확실)" : "마피아가 아니다(확실)"}.`);
+    others("police").forEach((id) => notes.push(`${name(id)}은(는) 경찰을 주장하지만 진짜 경찰은 나다. ${name(id)}은(는) 가짜이며 마피아일 가능성이 높다.`));
+    for (const r of detectReports(s)) {
+      if (r.by === p.id) continue;
+      const mine = (s.policeLog[p.id] ?? []).find((x) => x.target === r.target);
+      if (mine && (mine.isMafia ? "mafia" : "clean") !== r.result) notes.push(`${name(r.by)}의 ${name(r.target)} 보고는 내 조사 결과와 다르다. ${name(r.by)}은(는) 거짓말을 하고 있다.`);
+    }
+  }
+  if (p.role === "doctor") {
+    for (const r of s.doctorLog[p.id] ?? [])
+      notes.push(r.saved ? `내가 ${r.day}일차 밤에 보호한 ${name(r.target)}이(가) 실제로 습격을 받았고 내가 살렸다. ${name(r.target)}은(는) 마피아의 표적이었으니 마피아가 아니다(확실).` : `내가 ${r.day}일차 밤에 ${name(r.target)}을(를) 보호했다(그날 그 사람은 습격받지 않았다).`);
+    others("doctor").forEach((id) => notes.push(`${name(id)}은(는) 의사를 주장하지만 진짜 의사는 나다. ${name(id)}은(는) 가짜다.`));
+  }
+  if (p.role === "soldier") {
+    if (!p.shield && p.alive) notes.push("나는 마피아의 습격을 한 번 받고 버텼다. 마피아가 나를 노렸다는 뜻이다.");
+    others("soldier").forEach((id) => notes.push(`${name(id)}은(는) 군인을 주장하지만 진짜 군인은 나다. ${name(id)}은(는) 가짜다.`));
+  }
+  if (p.role === "mafia") {
+    const partners = s.players.filter((x) => x.role === "mafia" && x.id !== p.id).map((x) => x.name);
+    if (partners.length) notes.push(`동료 마피아: ${partners.join(", ")}. 동료를 대놓고 감싸면 들킨다.`);
+    for (const k of s.mafiaLog)
+      notes.push(`${k.day}일차 밤 우리가 노린 ${name(k.target)}: ${k.result === "killed" ? "살해 성공" : k.result === "saved" ? "의사가 막음(그 밤 의사가 그를 보호했다)" : "버텨냄(군인일 가능성이 높다)"}.`);
+    (["police", "doctor"] as Role[]).forEach((r) => others(r).filter((id) => s.players[id].alive).forEach((id) => notes.push(`${name(id)}은(는) ${ROLE_LABEL[r]}을(를) 주장했다. 진짜라면 위협이 되니 밤의 표적 후보다.`)));
+  }
+  // 나에 대한 보고는 내 실제 직업으로 진위를 안다
+  const truth = p.role === "mafia" ? "mafia" : "clean";
+  for (const r of detectReports(s)) {
+    if (r.target !== p.id || r.by === p.id) continue;
+    if (r.result !== truth) notes.push(`${name(r.by)}이(가) 나를 "${r.result === "mafia" ? "마피아" : "마피아 아님"}"이라 보고했지만 사실과 다르다. ${name(r.by)}은(는) 진짜 경찰이 아니다.`);
+    else if (p.role !== "mafia") notes.push(`${name(r.by)}이(가) 나를 마피아가 아니라고 보고했고 사실이다. ${name(r.by)}은(는) 진짜 경찰일 가능성이 높다.`);
+  }
+  return notes;
 }
