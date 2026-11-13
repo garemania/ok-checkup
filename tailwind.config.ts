@@ -68,6 +68,12 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       keyframes: {
+        banner: {
+          "0%": { opacity: "0", transform: "scale(0.94)" },
+          "15%": { opacity: "1", transform: "scale(1)" },
+          "80%": { opacity: "1" },
+          "100%": { opacity: "0" },
+        },
         shake: {
           "0%, 100%": { transform: "translate(0,0)" },
           "20%": { transform: "translate(-3px, 1px) rotate(-1deg)" },

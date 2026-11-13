@@ -9,7 +9,7 @@ describe("engine", () => {
     const s = createGame("나");
     expect(s.players).toHaveLength(8);
     const count = (r: string) => s.players.filter((p) => p.role === r).length;
-    expect([count("mafia"), count("police"), count("doctor"), count("citizen")]).toEqual([2, 1, 1, 4]);
+    expect([count("mafia"), count("police"), count("doctor"), count("soldier"), count("citizen")]).toEqual([2, 1, 1, 1, 3]);
     expect(s.players[HUMAN_ID].isHuman).toBe(true);
   });
 
@@ -96,7 +96,7 @@ describe("Gemini provider", () => {
 describe("wasPhrase", () => {
   it("picks 이었/였 by final consonant", async () => {
     const { wasPhrase } = await import("./engine");
-    expect(["마피아", "경찰", "의사", "시민"].map(wasPhrase)).toEqual(["마피아였습니다", "경찰이었습니다", "의사였습니다", "시민이었습니다"]);
+    expect(["마피아", "경찰", "의사", "군인", "시민"].map(wasPhrase)).toEqual(["마피아였습니다", "경찰이었습니다", "의사였습니다", "군인이었습니다", "시민이었습니다"]);
   });
 });
 
@@ -232,5 +232,63 @@ describe("emotion", () => {
     expect(emotionOf(s, 1)).toBe("scared");
     s = kill(s, 1, false);
     expect(emotionOf(s, 1)).toBe("dead");
+  });
+});
+
+describe("night resolution", () => {
+  const setup = (day: number) => {
+    const s = { ...createGame("나"), day };
+    const mafia = s.players.find((p) => p.role === "mafia")!;
+    const target = s.players.find((p) => p.role === "citizen")!;
+    return { s, mafia, target };
+  };
+  it("no one is attacked on the first night, but police still investigate", async () => {
+    const { resolveNight } = await import("./engine");
+    const { s, target } = setup(1);
+    const police = s.players.find((p) => p.role === "police")!;
+    const r = resolveNight(s, { kill: target.id, protect: null, investigate: { actor: police.id, target: target.id } });
+    expect(r.state.players.every((p) => p.alive)).toBe(true);
+    expect(r.result).toContain("첫 밤");
+    expect(r.state.policeLog[police.id]).toHaveLength(1);
+  });
+  it("kills from the second night", async () => {
+    const { resolveNight } = await import("./engine");
+    const { s, target } = setup(2);
+    const r = resolveNight(s, { kill: target.id, protect: null, investigate: null });
+    expect(r.state.players[target.id].alive).toBe(false);
+    expect(r.result).toContain(target.name);
+  });
+  it("doctor saves the target", async () => {
+    const { resolveNight } = await import("./engine");
+    const { s, target } = setup(2);
+    const r = resolveNight(s, { kill: target.id, protect: target.id, investigate: null });
+    expect(r.state.players[target.id].alive).toBe(true);
+  });
+  it("soldier survives one attack, then dies", async () => {
+    const { resolveNight } = await import("./engine");
+    const { s } = setup(2);
+    const soldier = s.players.find((p) => p.role === "soldier")!;
+    const r1 = resolveNight(s, { kill: soldier.id, protect: null, investigate: null });
+    expect(r1.state.players[soldier.id].alive).toBe(true);
+    expect(r1.state.players[soldier.id].shield).toBe(false);
+    const r2 = resolveNight({ ...r1.state, day: 3 }, { kill: soldier.id, protect: null, investigate: null });
+    expect(r2.state.players[soldier.id].alive).toBe(false);
+  });
+});
+
+describe("trial verdict", () => {
+  it("needs strictly more yes than no", async () => {
+    const { tallyVerdict } = await import("./engine");
+    expect(tallyVerdict({ 1: true, 2: true, 3: false }).execute).toBe(true);
+    expect(tallyVerdict({ 1: true, 2: false }).execute).toBe(false);
+    expect(tallyVerdict({ 1: false, 2: false, 3: true }).execute).toBe(false);
+  });
+  it("mock AI mafia never convicts a partner", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    const [m1, m2] = s.players.filter((p) => p.role === "mafia");
+    const voter = m1.isHuman ? m2 : m1;
+    const partner = voter === m1 ? m2 : m1;
+    expect(await ai.verdict(s, voter, partner.id)).toBe(false);
   });
 });

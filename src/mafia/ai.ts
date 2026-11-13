@@ -135,6 +135,7 @@ function privateKnowledge(s: GameState, p: Player): string {
     lines.push("정체를 밝히면 마피아의 표적이 됩니다. 언제 공개할지 전략적으로 판단하세요.");
   }
   if (p.role === "doctor") lines.push("정체를 밝히면 마피아의 표적이 됩니다. 전략적으로 판단하세요.");
+  if (p.role === "soldier") lines.push(`당신은 마피아의 습격을 한 번 버텨냅니다(방어 ${p.shield ? "남음" : "이미 소진"}). 정체를 숨기고 시민을 도우세요.`);
   if (p.role === "citizen") lines.push("당신은 특별한 정보가 없습니다. 토론 내용을 보고 추리하세요.");
   return lines.join("\n");
 }
@@ -144,7 +145,7 @@ function systemPrompt(s: GameState, p: Player): string {
 성격: ${p.persona}
 말투: ${p.speech}
 
-[규칙] 마피아 2, 경찰 1, 의사 1, 시민 4. 낮에는 토론 후 투표로 1명을 처형하고, 밤에는 마피아가 1명을 살해, 의사가 1명을 보호, 경찰이 1명을 조사합니다. 마피아가 전멸하면 시민 승리, 마피아 수가 시민 수 이상이면 마피아 승리. 처형된 사람의 직업은 공개됩니다.
+[규칙] 마피아 2, 경찰 1, 의사 1, 군인 1(마피아의 습격을 한 번 버팀), 시민 3. 첫 밤에는 살해가 없고 둘째 밤부터 마피아가 움직입니다. 낮에는 토론 후 투표로 최다 득표자를 지목하고, 그 사람의 최후의 변론을 들은 뒤 찬반 투표(찬성이 반대보다 많으면 처형)를 합니다. 밤에는 마피아가 1명을 살해, 의사가 1명을 보호, 경찰이 1명을 조사합니다. 마피아가 전멸하면 시민 승리, 마피아 수가 시민 수 이상이면 마피아 승리. 처형된 사람의 직업은 공개됩니다.
 
 [비공개 정보]
 ${privateKnowledge(s, p)}
@@ -218,6 +219,8 @@ export interface AI {
   vote(s: GameState, p: Player): Promise<number | null>;
   nightTarget(s: GameState, p: Player, kind: "kill" | "protect" | "investigate"): Promise<number>;
   whisper(s: GameState, p: Player, userText: string): Promise<Spoken>;
+  /** 최후 찬반 투표: true = 처형에 찬성 */
+  verdict(s: GameState, p: Player, accused: number): Promise<boolean>;
 }
 
 const EMOTION_RULE = `발언 맨 앞에 지금 표정을 [감정] 태그로 붙이세요. 감정은 neutral, happy, angry, sad, surprised, suspicious, scared, smug 중 하나입니다. 예: [suspicious] 서연, 아까 말이 좀 이상했어.`;
@@ -253,6 +256,14 @@ ${EMOTION_RULE}`;
         if (r === null) throw new Error("target parse: null");
         return r;
       }, () => mock.nightTarget(s, p, kind)),
+    verdict: (s, p, accused) =>
+      safe(async () => {
+        const task = `${s.players[accused].name}에 대한 최종 찬반 투표입니다. 처형에 찬성하면 {"execute": true}, 반대하면 {"execute": false} JSON 한 줄만 출력하세요.`;
+        const t = await callLLM(settings, systemPrompt(s, p), `${stateBlock(s, p)}\n\n${task}`, 120);
+        const m = t.match(/"execute"\s*:\s*(true|false)/i);
+        if (!m) throw new Error(`verdict parse: ${t.slice(0, 120) || "(빈 응답)"}`);
+        return m[1].toLowerCase() === "true";
+      }, () => mock.verdict(s, p, accused)),
     whisper: (s, p, userText) =>
       safe(async () => {
         const night = s.phase === "night";
@@ -315,6 +326,35 @@ function makeMockAI(): AI {
       const target = top(sc);
       const tn = target !== null ? nameOf(s, target) : "누군가";
       const taeo = p.name === "태오";
+      const informal = /(반말|털털|가벼운|단호|평어)/.test(p.speech);
+      if (hint?.startsWith("[재판]")) {
+        if (hint.includes("변론")) {
+          return pick(informal
+            ? ["난 마피아가 아니야. 내 표를 이렇게 날리면 진짜 마피아만 좋아져.", "억울하다. 한 번만 더 생각해 봐. 나를 처형하면 후회한다.", "근거도 없이 나를 몰아가네. 그래도 마지막으로 말한다. 난 시민이다."]
+            : ["저는 마피아가 아닙니다. 지금 저를 처형하면 진짜 마피아만 웃게 됩니다.", "정말 억울합니다. 한 번만 다시 생각해 주세요.", "근거 없이 지목되었지만, 저는 시민이라는 것을 마지막으로 말씀드립니다."]);
+        }
+        return pick(informal
+          ? ["여기까지네. 남은 사람들, 진짜 마피아를 꼭 잡아 줘.", "내 몫은 여기까지다. 잘 부탁한다."]
+          : ["여기까지인가 봅니다. 남은 분들이 꼭 마피아를 찾아내 주세요.", "제 몫은 여기까지네요. 부탁드립니다."]);
+      }
+      if (hint?.startsWith("[지목]")) {
+        return pick(informal
+          ? ["나를 지목해? 근거부터 대 봐. 난 아니야.", "왜 나야? 그쪽이 더 수상한데."]
+          : ["저를 지목하시는 근거가 무엇인가요? 저는 아닙니다.", "지목은 받아들이기 어렵네요. 오히려 다른 분이 더 의심스럽습니다."]);
+      }
+      if (hint?.startsWith("[질문]")) {
+        return pick(informal
+          ? ["그 시간엔 그냥 자고 있었지. 의심하려면 증거를 가져와.", "난 시민이라 별 행동 없었어. 더 물어볼 거 있어?"]
+          : ["그 시간에는 그냥 쉬고 있었습니다. 특별한 일은 없었어요.", "저는 시민으로서 지켜보고 있었을 뿐입니다."]);
+      }
+      if (hint?.startsWith("[옹호]")) {
+        return pick(informal ? ["고맙다. 나도 널 믿는다.", "그래, 그렇게 봐 주니 든든하네."] : ["감사합니다. 저도 믿고 있어요.", "그렇게 봐 주셔서 고맙습니다."]);
+      }
+      if (hint?.startsWith("[주장]")) {
+        return pick(informal
+          ? ["그 말이 사실이라면 증명해 봐. 믿기는 어렵다.", "직업 공개라... 일단 지켜보자. 거짓이면 바로 들통난다."]
+          : ["그 말이 사실인지 지켜보겠습니다. 거짓이라면 곧 드러나겠죠.", "직업을 밝히셨군요. 믿을 근거가 더 필요합니다."]);
+      }
       const accusedMe = s.log.slice(-8).some((m) => m.from !== "system" && m.from !== p.id && m.text.includes(p.name) && /(의심|마피아|수상)/.test(m.text));
       const rec = (s.policeLog[p.id] ?? []).filter((r) => r.isMafia && s.players[r.target].alive);
       const formal = !/(반말|털털|가벼운|단호)/.test(p.speech);
@@ -362,6 +402,17 @@ function makeMockAI(): AI {
       const t = pool.filter((x) => x.id !== p.id && !done.includes(x.id));
       return pick(t.length ? t : pool.filter((x) => x.id !== p.id)).id;
     },
+    async verdict(s, p, accused) {
+      await wait(120 + Math.random() * 200);
+      if (p.role === "mafia") {
+        if (mafiaPartners(s, p.id).some((x) => x.id === accused)) return false;
+        return true; // 시민 쪽을 처형하는 데 찬성
+      }
+      const sc = suspicion(s, p);
+      const known = (s.policeLog[p.id] ?? []).find((r) => r.target === accused);
+      if (known) return known.isMafia;
+      return top(sc) === accused || (sc[accused] ?? 0) > 1.6 || Math.random() < 0.35;
+    },
     async whisper(s, p, userText) {
       await wait(500 + Math.random() * 500);
       const sc = suspicion(s, p);
@@ -384,6 +435,7 @@ function makeMockAI(): AI {
     },
     vote: raw.vote,
     nightTarget: raw.nightTarget,
+    verdict: raw.verdict,
     whisper: async (s, p, t) => {
       const text = await raw.whisper(s, p, t);
       return { text, emotion: detectEmotion(text) };
