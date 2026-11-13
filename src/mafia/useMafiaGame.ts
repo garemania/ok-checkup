@@ -4,7 +4,7 @@ import { nextTurn, openerTurn } from "./director";
 import { AUTO_ADVANCE_MS, HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY, WATCH_LINES } from "./data";
 import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman, sanitizeMeaning } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
-import { ROLE_LABEL } from "./types";
+import { GUESS_ORDER, ROLE_LABEL } from "./types";
 import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
@@ -44,6 +44,13 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const [typing, setTyping] = useState<number | null>(null); // 1:1 답장 작성 중인 AI
   const [errors, setErrors] = useState<string[]>([]); // 최근 API 오류 (설정 화면에서 확인/복사)
   const [unread, setUnread] = useState<Record<number, boolean>>({});
+  // 내 직업 추정 메모 (AI에게 전달되지 않음, 새 게임마다 초기화)
+  const [guesses, setGuesses] = useState<Record<number, Role | null>>({});
+  const cycleGuess = (id: number) =>
+    setGuesses((g) => {
+      const i = GUESS_ORDER.indexOf(g[id] ?? null);
+      return { ...g, [id]: GUESS_ORDER[(i + 1) % GUESS_ORDER.length] };
+    });
   const ref = useRef<GameState | null>(null);
   const runId = useRef(0);
   // 대사를 한 줄씩 보여주고 사용자가 "다음"을 눌러야 넘어가게 하는 장치
@@ -132,6 +139,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setSpeaking(null);
     setTyping(null);
     setUnread({});
+    setGuesses({});
     commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다. 첫 밤에는 마피아의 살해만 없고, 경찰 조사 같은 능력은 정상적으로 사용할 수 있습니다.", "night"));
   };
 
@@ -621,7 +629,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   return {
-    waiting, advance, watching, runWatch, stopWatch, toggleAutoAdvance: () => {
+    guesses, cycleGuess, waiting, advance, watching, runWatch, stopWatch, toggleAutoAdvance: () => {
       const on = !settingsRef.current.autoAdvance;
       setSettings({ ...settingsRef.current, autoAdvance: on });
       settingsRef.current = { ...settingsRef.current, autoAdvance: on };

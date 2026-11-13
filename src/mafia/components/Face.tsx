@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
-import { ROLE_LABEL } from "../types";
+import { ROLE_LABEL, ROLE_TONE } from "../types";
 import { RoleIcon } from "./RoleIcon";
-import type { Emotion, Player } from "../types";
+import type { Emotion, Player, Role } from "../types";
 import { FaceArt } from "./FaceArt";
 
 interface Props {
@@ -15,13 +15,18 @@ interface Props {
   votedByMe?: boolean;
   unread?: boolean;
   selected?: boolean;
+  guess?: Role | null; // 내 직업 추정 메모
+  onGuess?: () => void;
   onClick: () => void;
 }
 
-export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteCount, votedByMe, unread, selected, onClick }: Props) {
+export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteCount, votedByMe, unread, selected, guess, onGuess, onClick }: Props) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       className={cn(
         "group relative flex min-w-0 flex-col items-center gap-0.5 rounded-lg p-0.5 transition sm:gap-1 sm:rounded-xl sm:p-1.5",
         "hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -52,10 +57,34 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
         {isMe && <span className="hidden rounded bg-primary px-1 text-[10px] text-primary-foreground sm:inline">ME</span>}
         <span className={cn(!p.alive && "line-through text-muted-foreground")}>{p.name}</span>
       </div>
-      <div className="h-3 text-[11px] text-muted-foreground sm:h-4">
-        {showRole ? <span className="inline-flex items-center gap-0.5"><RoleIcon role={p.role} className="h-3 w-3" /><span className="hidden sm:inline">{ROLE_LABEL[p.role]}</span></span> : <span className="hidden sm:inline">{p.alive ? "생존" : "사망"}</span>}
-        {votedByMe && <span className="hidden sm:inline"> (투표)</span>}
-      </div>
-    </button>
+      {showRole ? (
+        <div className="flex h-4 items-center text-[11px] text-muted-foreground sm:h-5">
+          <span className="inline-flex items-center gap-0.5"><RoleIcon role={p.role} className="h-3 w-3" /><span className="hidden sm:inline">{ROLE_LABEL[p.role]}</span></span>
+          {votedByMe && <span className="hidden sm:inline"> (투표)</span>}
+        </div>
+      ) : onGuess ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onGuess(); }}
+          className={cn(
+            "flex h-4 min-w-[1.6rem] items-center justify-center gap-0.5 rounded-full border px-1 text-[9px] font-bold leading-none sm:h-5 sm:px-1.5 sm:text-[10px]",
+            guess ? ROLE_TONE[guess] : "border-dashed border-border text-muted-foreground",
+          )}
+          aria-label={`${p.name} 직업 추정: ${guess ? ROLE_LABEL[guess] : "모름"} (누르면 바뀜)`}
+        >
+          {guess ? (
+            <>
+              <RoleIcon role={guess} className="h-2.5 w-2.5" />
+              <span className="sm:hidden">{ROLE_LABEL[guess].slice(0, 1)}</span>
+              <span className="hidden sm:inline">{ROLE_LABEL[guess]}</span>
+            </>
+          ) : (
+            <span>?</span>
+          )}
+        </button>
+      ) : (
+        <div className="h-4 sm:h-5" />
+      )}
+    </div>
   );
 }

@@ -19,6 +19,7 @@ interface Props {
   onWatch: () => void;
   onStopWatch: () => void;
   awaitingHuman: boolean;
+  guesses?: Record<number, Role | null>; // 내 직업 추정 메모 (대상 고르기에 표시)
   target: number | null;
   setTarget: (id: number | null) => void;
   onNight: (target?: number) => void;
@@ -48,7 +49,7 @@ const ACTIONS = [
 type ActionKind = (typeof ACTIONS)[number]["kind"];
 const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
-export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
+export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, guesses = {}, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
   const [talkTo, setTalkTo] = useState<number | null>(null); // 공개적으로 말을 걸 대상 (없으면 모두에게)
   const [defense, setDefense] = useState("");
@@ -68,6 +69,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
       >
         <FaceArt look={p.look} hue={p.color} emotion="neutral" className="h-6 w-6 rounded" />
         {p.name}
+        {guesses[id] && <span className="inline-flex items-center gap-0.5 text-[10px] opacity-80"><RoleIcon role={guesses[id]!} className="h-3 w-3" />{ROLE_LABEL[guesses[id]!]}?</span>}
       </button>
     );
   };

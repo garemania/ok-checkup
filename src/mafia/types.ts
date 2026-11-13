@@ -112,3 +112,15 @@ export const ROLE_DESC: Record<Role, string> = {
   soldier: "마피아의 습격을 한 번 버텨냅니다. 능력은 자동으로 발동합니다.",
   citizen: "특별한 능력은 없지만 토론과 투표로 마피아를 찾아내야 합니다.",
 };
+
+/** 직업 추정 메모의 순서 (누를 때마다 다음으로) */
+export const GUESS_ORDER: (Role | null)[] = [null, "mafia", "police", "doctor", "soldier", "citizen"];
+
+/** 직업별 색 (추정 칩) */
+export const ROLE_TONE: Record<Role, string> = {
+  mafia: "border-red-500/70 bg-red-500/20 text-red-300",
+  police: "border-sky-500/70 bg-sky-500/20 text-sky-300",
+  doctor: "border-emerald-500/70 bg-emerald-500/20 text-emerald-300",
+  soldier: "border-amber-500/70 bg-amber-500/20 text-amber-300",
+  citizen: "border-zinc-400/60 bg-zinc-500/20 text-zinc-200",
+};

@@ -99,6 +99,8 @@ const Mafia = () => {
                 voteCount={state.phase === "vote" && Object.keys(state.votes).length ? counts[p.id] : undefined}
                 unread={g.unread[p.id]}
                 selected={target === p.id}
+                guess={g.guesses[p.id] ?? null}
+                onGuess={p.isHuman ? undefined : () => g.cycleGuess(p.id)}
                 onClick={() => openWhisper(p.id)}
               />
             );
@@ -119,6 +121,7 @@ const Mafia = () => {
             onWatch={g.runWatch}
             onStopWatch={g.stopWatch}
             awaitingHuman={g.awaitingHuman}
+            guesses={g.guesses}
             target={target}
             setTarget={setTarget}
             onNight={g.runNight}
