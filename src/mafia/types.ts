@@ -38,6 +38,7 @@ export interface ChatMsg {
   emotion?: Emotion;
   meaning?: Meaning; // 발언의 구조적 해석 (직업 주장, 조사 보고)
   auto?: boolean; // 플레이어 대신 자동으로 한 말
+  replyTo?: number; // 이 말이 답하고 있는 메시지 id (화면에 원래 질문을 인용)
 }
 
 export interface Meaning {

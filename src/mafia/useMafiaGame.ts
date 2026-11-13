@@ -272,10 +272,9 @@ export function useMafiaGame(onError: (msg: string) => void) {
       setSpeaking(null);
       commit((x) => {
         const next = addMsg(x, turn.player.id, said.text, undefined, said.emotion);
-        if (!turn.proxy) return next;
         const log = next.log.slice();
-        log[log.length - 1] = { ...log[log.length - 1], auto: true };
-        return { ...next, log, autoUsed: x.autoUsed + 1 };
+        log[log.length - 1] = { ...log[log.length - 1], ...(turn.proxy ? { auto: true } : {}), ...(turn.replyTo !== undefined ? { replyTo: turn.replyTo } : {}) };
+        return { ...next, log, autoUsed: turn.proxy ? x.autoUsed + 1 : x.autoUsed };
       });
       if (i < lines - 1) {
         await waitLine();
@@ -306,16 +305,22 @@ export function useMafiaGame(onError: (msg: string) => void) {
 
 
   /** 지정한 캐릭터들이 한 줄씩 말한다 (마지막 줄 전까지는 "다음"을 기다린다). 중단되면 false */
-  const respond = async (id: number, items: { player: Player; hint: string }[]): Promise<boolean> => {
+  const respond = async (id: number, items: { player: Player; hint: string; replyTo?: number }[]): Promise<boolean> => {
     const engine = ai();
     for (let i = 0; i < items.length; i++) {
-      const { player, hint } = items[i];
+      const { player, hint, replyTo } = items[i];
       if (!alivePhaseGuard(id)) return false;
       setSpeaking(player.id);
       const said = await engine.speak(ref.current!, ref.current!.players[player.id], hint);
       if (!alivePhaseGuard(id)) return false;
       setSpeaking(null);
-      commit((x) => addMsg(x, player.id, said.text, undefined, said.emotion));
+      commit((x) => {
+        const next = addMsg(x, player.id, said.text, undefined, said.emotion);
+        if (replyTo === undefined) return next;
+        const log = next.log.slice();
+        log[log.length - 1] = { ...log[log.length - 1], replyTo };
+        return { ...next, log };
+      });
       if (i < items.length - 1) {
         await waitLine();
         if (!alivePhaseGuard(id)) return false;
@@ -404,6 +409,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
         hint: `플레이어(${me0})가 방금 발언했습니다.${meaning.summary ? ` (발언 해석: ${meaning.summary})` : ""} ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
       }));
     }
+    // 첫 반응은 플레이어의 말에 대한 답이므로 원래 말을 인용해 보여준다
+    if (items[0]) items[0] = { ...items[0], replyTo: msgId } as (typeof items)[number];
     return respond(id, items);
   };
 

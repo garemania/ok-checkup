@@ -388,7 +388,9 @@ export function addresseeOf(s: GameState, m: ChatMsg): number | null {
 /** 자기 자신을 이름(3인칭)으로 부르는 어색한 문장인지 검사. "저 서연은 ..."처럼 1인칭 자기소개는 허용 */
 export function speaksOfSelf(text: string, name: string): boolean {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?![가-힣]{2})`).test(text);
+  // 이름(+님/씨)(+조사)가 한 단어로 쓰였는지: "하은님을", "지후 살린", "서연이 시민"
+  const particle = "(?:이가|이는|이를|이도|이한테|이랑|이|가|은|는|을|를|의|도|에게|한테|랑|과|와|께서|께|이다|야|아)?";
+  return new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?:님|씨)?${particle}(?![가-힣])`).test(text);
 }
 
 /** 죽은 사람에게 말을 거는 문장이면 그 사람의 id */
@@ -506,4 +508,23 @@ export function repeatsQuestion(s: GameState, speaker: number, text: string): bo
   return s.log.some(
     (m) => m.from !== "system" && m.day === s.day && targets.some((n) => m.text.includes(n)) && similarity(m.text, text) >= 0.32,
   );
+}
+
+const ANSWER_MARK = /(때문|이유|그건|그거는|그게|네[,.\s]|예[,.\s]|아니요|아뇨|아니에요|아니야|아닙니다|맞아|맞아요|맞습니다|했어요|했어|했습니다|했죠|봤어요|봤어|라서|해서|거든|모르겠|몰라|없어요|없어|없습니다|있어요|있어|있습니다|근거는|왜냐)/;
+
+/** 질문에 답하지 않고 넘기는 답인지 (답의 표지가 없고, 되묻거나 다른 사람 얘기로 넘어감) */
+export function isEvasive(s: GameState, speaker: number, question: string, reply: string): boolean {
+  if (ANSWER_MARK.test(reply)) return false;
+  const others = s.players.filter((p) => p.id !== speaker && reply.includes(p.name) && !question.includes(p.name));
+  return /\?/.test(reply) || others.length > 0;
+}
+
+const VAGUE_RE = /(정리하고|정리해|지켜보|시간만\s*가|좀\s*더\s*(?:보|들어|지켜)|판단은\s*(?:아끼|보류|미루)|조심스러|애매|글쎄)/;
+
+/** 누구를 왜 의심하는지 없이 겉도는 말인지 */
+export function isVague(s: GameState, speaker: number, text: string): boolean {
+  if (!VAGUE_RE.test(text)) return false;
+  const namesSomeone = s.players.some((p) => p.id !== speaker && text.includes(p.name));
+  const hasReason = /(때문|이유|근거|왜냐|라서|해서|거든|투표|주장|보고|모순)/.test(text);
+  return !(namesSomeone && hasReason);
 }

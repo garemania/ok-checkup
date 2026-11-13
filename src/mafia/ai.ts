@@ -1,6 +1,6 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, isRepetitive, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -158,6 +158,8 @@ const RULEBOOK = `[게임 규칙 전체]
  - 의심할 때도 구체적인 근거(모순, 주장 충돌, 누가 누구에게 투표했는지, 공개된 직업과의 불일치)를 댄다. 근거 없는 의심을 반복하지 않는다.
  - [공개된 사실만으로 확실한 것]에 있는 추론은 사실로 받아들인다.
  - 당연한 사실(마피아는 시민 팀을 노린다, 밤에는 누군가 죽을 수 있다 등)을 새로운 발견처럼 말하지 않는다. 의미 있는 추리를 한다(예: "도윤이 어제 태오를 의심했는데 바로 당했다").
+ - 질문을 받으면 첫 문장에서 바로 답한다(예/아니오, 이유, 누구인지). 모르면 모른다고 분명히 말한다. 질문에 질문으로 답하거나 다른 사람 얘기로 넘기지 않는다. 다른 사람끼리의 질문에도 답이 안 나왔다면 대신 끼어들어 흐리지 말고 답을 기다리거나 그 질문을 정확히 짚는다.
+ - 겉도는 말("정리하자", "지켜보자", "시간만 간다")만 하지 않는다. 누구를, 왜(어떤 말·투표·주장 때문에) 의심하거나 믿는지 구체적으로 말한다.
  - 같은 사람에게 같은 내용으로 다시 추궁하지 않는다. 이미 물었고 답이 나왔으면, 그 답을 평가하거나 새 근거를 대거나 다른 이야기로 넘어간다.
  - 누가 정보를 공개했다는 이유만으로 의심하지 않는다. 주장이 공개된 사실과 맞으면 일단 그럴듯하게 받아들이고, 반박할 근거(맞서는 주장, 사실과의 모순)가 있을 때만 의심한다. 말을 했다고 몰아가지 말고, 같은 사람을 근거 없이 계속 몰아붙이지 않는다.
 8. 목표와 정보: 시민 팀(경찰, 의사, 군인, 시민)은 마피아를 모두 찾아 처형해야 이긴다. 마피아는 정체를 숨기고 시민 팀을 줄여 수가 같아지면 이긴다. 다른 사람의 직업은 아무도 모른다(마피아끼리만 서로 안다). AI든 사람이든 모두 같은 조건이니, 직업을 아는 척하지 말고 대화와 사실로 추리한다.
@@ -307,6 +309,10 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
     if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
     const dead = addressesDead(s, text, p.id);
     out.push(...ruleViolations(text));
+    const asked = task.match(/\[응답\][^"]*"([^"]+)"/)?.[1];
+    if (asked && /\?|왜|누구|뭐|무슨|어떻게|는지|나요|까요/.test(asked) && isEvasive(s, p.id, asked, text))
+      out.push(`질문("${asked}")에 답하지 않았습니다. 첫 문장에서 바로 답하세요(예/아니오, 이유, 누구인지). 모르면 모른다고 하세요. 되묻거나 다른 사람 얘기로 넘기지 마세요.`);
+    if (isVague(s, p.id, text)) out.push("말이 겉돕니다. \"정리하자/지켜보자\" 대신 누구를 왜(어떤 말·투표·주장 때문에) 의심하거나 믿는지 구체적으로 말하세요.");
     if (repeatsQuestion(s, p.id, text)) out.push("오늘 이미 같은 사람에게 비슷한 내용으로 묻거나 추궁했습니다. 같은 걸로 다시 추궁하지 말고, 새 근거를 대거나 다른 이야기로 넘어가세요.");
     if (isRepetitive(s, p.id, text)) out.push("방금 나온 말(또는 당신이 최근에 한 말)과 거의 같습니다. 같은 얘기를 되풀이하지 말고 새로운 근거, 다른 사람, 다른 쟁점, 또는 결론을 말하세요.");
     if (dead !== null) out.push(`${s.players[dead].name}은(는) 이미 사망해서 말도 대답도 할 수 없습니다. 죽은 사람에게 묻거나 대답을 요구하지 말고 살아 있는 사람에게 말하세요. (생전의 발언을 근거로 언급하는 것은 괜찮습니다.)`);
@@ -596,8 +602,8 @@ function makeMockAI(): AI {
         if (taeo) return taeoLine("police", tn, nameOf(s, rec[0].target));
         return `제가 경찰입니다. 조사해보니 ${nameOf(s, rec[0].target)}님이 마피아예요. 오늘 투표는 그분으로 갑시다.`;
       }
-      if (taeo && accusedMe) return taeoLine("accused", tn);
-      if (accusedMe) return pick(formal
+      if (taeo && accusedMe && !hint?.startsWith("[응답]")) return taeoLine("accused", tn);
+      if (accusedMe && !hint?.startsWith("[응답]")) return pick(formal
         ? ["저를 의심하시는 건 근거가 부족해 보여요. 오히려 제가 보기엔 " + tn + "님이 수상합니다.", "억울하네요. 저는 시민입니다. 차라리 " + tn + "님을 보세요.", "제 어느 말이 수상했는지 짚어 주세요. 해명할게요.", "저를 몰아가는 흐름이 오히려 이상해요. " + tn + "님은 왜 조용하시죠?"]
         : ["나 의심하는 건 좀 억울한데? 난 " + tn + " 쪽이 더 수상해.", "어허, 날 몰아가지 마. " + tn + " 좀 봐.", "내 말 중에 뭐가 걸렸는지 말해 봐. 해명할게.", "날 몰아가는 게 더 수상하다. " + tn + "는 왜 조용해?"]);
       if (hint?.startsWith("[시작]")) {
@@ -610,6 +616,11 @@ function makeMockAI(): AI {
       }
       if (hint?.startsWith("[응답]")) {
         const q = hint.match(/"([^"]*)"/)?.[1] ?? "";
+        // 질문이면 첫 문장에서 바로 답한다 (질문에 나온 사람이 있으면 그 사람을 두고 답한다)
+        const named = s.players.find((x) => x.id !== p.id && x.id !== HUMAN_ID && q.includes(x.name))?.name ?? tn;
+        if (/왜/.test(q)) return pick(formal ? [`그건 ${named}님 말이 계속 바뀌어서예요.`, `이유는 어제 투표예요. ${named}님이 근거 없이 표를 옮겼거든요.`] : [`그건 ${named} 말이 자꾸 바뀌어서야.`, `이유는 어제 투표야. ${named}가 근거 없이 표를 옮겼거든.`]);
+        if (/누구|누굴/.test(q)) return pick(formal ? [`${tn}님이요. 말이 제일 겉돌았거든요.`, `저는 ${tn}님을 봐요. 어제 투표가 이상했어요.`] : [`${tn}. 말이 제일 겉돌았거든.`, `난 ${tn}를 봐. 어제 투표가 이상했어.`]);
+        if (/근거|이유/.test(q)) return pick(formal ? [`근거는 어제 투표예요. ${named}님이 이유 없이 표를 옮겼어요.`, `솔직히 확실한 근거는 없어요. 느낌이 컸어요.`] : [`근거는 어제 투표야. ${named}가 이유 없이 표를 옮겼어.`, `솔직히 확실한 근거는 없어. 느낌이 컸어.`]);
         if (/(의심|수상|마피아|거짓|가짜)/.test(q)) return pick(formal ? ["저를 왜 그렇게 보세요? 근거를 말씀해 주시면 해명할게요.", "저는 아니에요. 그렇게 보신 이유가 궁금하네요."] : ["나를 왜 그렇게 봐? 근거를 대 봐.", "난 아니야. 왜 그렇게 생각했는데?"]);
         if (/\?|요\?|까\?/.test(q)) return pick(formal ? ["음, 저는 아직 확신은 없어요. 조금 더 지켜보려고요.", "좋은 질문이네요. 저는 투표 흐름을 보고 있어요."] : ["음, 아직 확신은 없어. 좀 더 보자.", "글쎄, 난 투표 흐름을 보고 있어."]);
         return pick(formal ? ["네, 저도 그렇게 생각해요.", "그 말 일리 있네요."] : ["ㅇㅇ 나도 그렇게 봐.", "그 말 일리 있네."]);

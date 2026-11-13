@@ -46,7 +46,18 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
             </span>
           </div>
           <div className="relative min-h-0 min-w-0 flex-1">
-            {toName && <div className="mb-1 truncate text-[11px] font-bold text-muted-foreground">{toName}에게</div>}
+            {(() => {
+              const q = last.replyTo !== undefined ? state.log.find((m) => m.id === last.replyTo) : undefined;
+              if (q && q.from !== "system") {
+                const qn = state.players[q.from].name;
+                return (
+                  <div className="mb-1.5 line-clamp-2 rounded-md border-l-2 border-primary/70 bg-secondary/50 px-2 py-1 text-[11px] text-muted-foreground">
+                    ↳ <b>{qn}</b>: {q.text}
+                  </div>
+                );
+              }
+              return toName ? <div className="mb-1 truncate text-[11px] font-bold text-muted-foreground">{toName}에게</div> : null;
+            })()}
             <div
               className={cn(
                 "relative max-h-full overflow-y-auto rounded-xl border-2 border-black bg-[#f4efe6] px-3 py-2 text-sm font-semibold leading-snug text-black shadow-[3px_3px_0_0_#000] sm:text-base",

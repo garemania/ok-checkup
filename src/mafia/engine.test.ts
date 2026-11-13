@@ -1136,3 +1136,71 @@ describe("rule talk is not a role claim", () => {
     expect(sanitizeMeaning("의사예요", { claim: "doctor" }).claim).toBe("doctor");
   });
 });
+
+describe("answer the question, no vague talk", () => {
+  it("whoever was asked and has not answered speaks next, quoting the question", async () => {
+    const { nextTurn } = await import("./director");
+    let s = { ...createGame("나"), day: 4 };
+    s = addMsg(s, 5, "하은님, 서연 말고 다른 근거가 있었는지 아직 답이 없어요?", "day");
+    s = addMsg(s, 7, "나도 그게 궁금하다.", "day");
+    const t = nextTurn(s)!;
+    expect(t.player.id).toBe(3);
+    expect(t.replyTo).toBe(s.log[0].id);
+    expect(t.hint).toContain("첫 문장에서 그 질문에 직접 답하세요");
+  });
+
+  it("spots a dodge and accepts a real answer", async () => {
+    const { isEvasive } = await import("./context");
+    const s = createGame("나");
+    const q = "하은님, 서연 말고 다른 근거가 있었어요?";
+    expect(isEvasive(s, 3, q, "민재님 말도 맞는데, 제가 답만 기다리고 있으면 또 시간만 가요... 태오님이 왜 계속 민재님만 미는지도 같이 봐야 할 것 같아요.")).toBe(true);
+    expect(isEvasive(s, 3, q, "근거는 어제 투표예요. 도윤님이 갑자기 표를 옮겼거든요.")).toBe(false);
+    expect(isEvasive(s, 3, q, "솔직히 다른 근거는 없어요.")).toBe(false);
+  });
+
+  it("spots vague filler but not concrete reasoning", async () => {
+    const { isVague } = await import("./context");
+    const s = createGame("나");
+    expect(isVague(s, 3, "일단 좀 더 지켜보죠.")).toBe(true);
+    expect(isVague(s, 5, "하은님, 도윤님 질문에 서연 말 말고 다른 근거가 있었는지 답이 없어요. 그것부터 정리하고 투표 얘기로 가죠.")).toBe(false);
+  });
+
+  it("rewrites a reply that dodges the question", async () => {
+    const orig = globalThis.fetch;
+    const replies = ["[suspicious] 태오님이 왜 계속 민재님만 미는지도 봐야 할 것 같아요?", "[neutral] 다른 근거는 없어요. 서연님 말이 제일 걸렸을 뿐이에요."];
+    let n = 0;
+    let last = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      last = JSON.parse(init.body as string).contents[0].parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: replies[Math.min(n++, 1)] }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      const said = await ai.speak(s, s.players[3], '[응답] 민재가 당신에게 물었습니다: "하은님, 서연 말고 다른 근거가 있었어요?" 첫 문장에서 그 질문에 직접 답하세요.');
+      expect(n).toBe(2);
+      expect(last).toContain("에 답하지 않았습니다");
+      expect(said.text).toBe("다른 근거는 없어요. 서연님 말이 제일 걸렸을 뿐이에요.");
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it("offline AIs answer 'why' and 'who' questions directly", async () => {
+    const { isEvasive } = await import("./context");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    for (const q of ["하은님, 왜 서연한테 투표했어요?", "하은님, 누구를 의심해요?", "하은님, 근거가 뭐예요?"]) {
+      const r = await ai.speak(s, s.players[3], `[응답] 민재가 당신에게 물었습니다: "${q}"`);
+      expect(isEvasive(s, 3, q, r.text)).toBe(false);
+    }
+  }, 30000);
+});
+
+describe("self reference with honorific and particle", () => {
+  it("catches '하은님을' said by 하은", async () => {
+    const { speaksOfSelf } = await import("./context");
+    expect(speaksOfSelf("도윤님도 그 흐름에 맞춰 하은님을 찍자고 하니까 걸려요", "하은")).toBe(true);
+    expect(speaksOfSelf("하은이가 왜 그래요", "하은")).toBe(true);
+    expect(speaksOfSelf("저 하은은 시민이에요", "하은")).toBe(false);
+    expect(speaksOfSelf("민재님 말도 맞는데요", "하은")).toBe(false);
+  });
+});
