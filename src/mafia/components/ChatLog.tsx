@@ -25,7 +25,7 @@ export function ChatLog({ state, speaking }: { state: GameState; speaking: numbe
           <div key={m.id} className={cn("flex items-end gap-2", mine && "flex-row-reverse")}>
             <FaceArt look={p.look} hue={p.color} emotion={m.emotion ?? "neutral"} className="h-11 w-11 shrink-0 rounded-md" />
             <div className={cn("max-w-[75%]", mine && "text-right")}>
-              <div className="mb-0.5 text-[11px] text-muted-foreground">{p.name}{m.emotion && m.emotion !== "neutral" && <span className="ml-1 opacity-70">· {EMOTION_LABEL[m.emotion]}</span>}{addresseeOf(state, m) !== null && <span className="ml-1 opacity-70">→ {state.players[addresseeOf(state, m)!].name}</span>}</div>
+              <div className="mb-0.5 text-[11px] text-muted-foreground">{p.name}{m.auto && <span className="ml-1 opacity-70">(자동)</span>}{m.emotion && m.emotion !== "neutral" && <span className="ml-1 opacity-70">· {EMOTION_LABEL[m.emotion]}</span>}{addresseeOf(state, m) !== null && <span className="ml-1 opacity-70">→ {state.players[addresseeOf(state, m)!].name}</span>}</div>
               <div className={cn("inline-block whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed", mine ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-secondary")}>
                 {m.text}
               </div>

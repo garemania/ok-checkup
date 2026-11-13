@@ -3,6 +3,7 @@ import type { Look, Role } from "./types";
 export const HUMAN_ID = 0;
 export const MAX_ROUNDS = 3; // 하루 토론 라운드 상한
 export const MAX_WHISPERS_PER_DAY = 8; // 하루 1:1 대화 가능 횟수
+export const MAX_AUTO_SPEAK_PER_DAY = 3; // 하루에 내 캐릭터가 자동으로 말하는 최대 횟수
 export const MAX_ACTIONS_PER_DAY = 3; // 하루 낮 행동(지목/옹호/추궁/직업 주장) 횟수
 
 export const ROLE_POOL: Role[] = [

@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { BUILD_LABEL } from "../buildInfo";
 import type { Settings } from "../types";
 
@@ -20,6 +21,13 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = 
           <div className="space-y-1.5">
             <Label>내 닉네임 (새 게임부터 적용)</Label>
             <Input value={s.nickname} maxLength={8} onChange={(e) => setS({ ...s, nickname: e.target.value })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+            <div>
+              <Label htmlFor="auto-speak">내 대사 자동</Label>
+              <p className="text-xs text-muted-foreground">대화 중 내 캐릭터도 하루 3번까지 알아서 말합니다. 직업이나 조사 결과는 밝히지 않습니다.</p>
+            </div>
+            <Switch id="auto-speak" checked={s.autoSpeak} onCheckedChange={(v) => setS({ ...s, autoSpeak: v })} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             {(["mock", "api"] as const).map((m) => (

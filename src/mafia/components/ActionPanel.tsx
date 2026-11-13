@@ -20,7 +20,7 @@ interface Props {
   setTarget: (id: number | null) => void;
   onNight: (target?: number) => void;
   onRound: () => void;
-  onSend: (t: string) => void;
+  onSend: (t: string, to: number | null) => void;
   onAction: (a: DayAction) => void;
   onStartVote: () => void;
   onVote: (t: number | null) => void;
@@ -47,6 +47,7 @@ const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
 export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
+  const [talkTo, setTalkTo] = useState<number | null>(null); // 공개적으로 말을 걸 대상 (없으면 모두에게)
   const [defense, setDefense] = useState("");
   const [mode, setMode] = useState<ActionKind | null>(null);
   const [claimRole, setClaimRole] = useState<Role | null>(null);
@@ -249,11 +250,23 @@ export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTa
           </div>
         )}
       </div>
-      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onSend(text); setText(""); } }}>
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onSend(text, talkTo !== null && state.players[talkTo].alive ? talkTo : null); setText(""); } }}>
+        <select
+          value={talkTo ?? ""}
+          onChange={(e) => setTalkTo(e.target.value === "" ? null : Number(e.target.value))}
+          disabled={!me.alive}
+          aria-label="말을 걸 대상"
+          className="h-10 w-[5.5rem] shrink-0 rounded-md border border-input bg-background px-1.5 text-xs sm:w-28 sm:text-sm"
+        >
+          <option value="">모두에게</option>
+          {living.filter((p) => !p.isHuman).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}에게</option>
+          ))}
+        </select>
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={!me.alive ? "사망하여 발언할 수 없습니다" : busy && waiting ? "끼어들어 말하기..." : "모두에게 발언하기..."}
+          placeholder={!me.alive ? "사망하여 발언할 수 없습니다" : talkTo !== null ? `${state.players[talkTo].name}에게 말하기 (모두가 들음)` : busy && waiting ? "끼어들어 말하기..." : "모두에게 발언하기..."}
           disabled={!me.alive || (busy && !waiting)}
           maxLength={200}
         />

@@ -20,6 +20,14 @@ export function InfoDialog({ state, open, onOpenChange }: { state: GameState; op
           {me.role === "mafia" && (
             <p>동료: {partners.map((p) => `${p.name}${p.alive ? "" : " (사망)"}`).join(", ")}</p>
           )}
+          {me.role === "doctor" && (
+            <div>
+              <p className="mb-1 font-semibold">보호 기록</p>
+              {(state.doctorLog[HUMAN_ID] ?? []).length ? (state.doctorLog[HUMAN_ID] ?? []).map((r, i) => (
+                <p key={i}>{r.day}일차 밤 · {state.players[r.target].name} 보호 → {r.saved ? "습격을 막음 (마피아가 아님)" : "습격 없음"}</p>
+              )) : <p className="text-muted-foreground">아직 보호한 사람이 없습니다. (보호는 둘째 밤부터)</p>}
+            </div>
+          )}
           {me.role === "police" && (
             <div>
               <p className="mb-1 font-semibold">조사 기록</p>
