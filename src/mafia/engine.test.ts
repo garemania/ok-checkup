@@ -999,3 +999,17 @@ describe("goals, hidden roles, abstaining", () => {
     expect(abstain).toBeGreaterThan(0);
   }, 30000);
 });
+
+describe("in-app API self test", () => {
+  it("runs all scenarios with the offline AI and the deterministic checks pass", async () => {
+    const { runSelfTest } = await import("./selftest");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const seen: string[] = [];
+    const results = await runSelfTest(ai, ai, "나", (r) => seen.push(r.title));
+    expect(results).toHaveLength(8);
+    expect(seen).toHaveLength(8);
+    for (const idx of [1, 2, 4, 5, 7]) {
+      for (const c of results[idx].checks) expect(`${results[idx].title} / ${c.label}: ${c.ok}`).toContain(": true");
+    }
+  }, 60000);
+});
