@@ -109,7 +109,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const ROLE_DESC: Record<Role, string> = {
   mafia: "밤마다 동료와 함께 한 명을 제거합니다. 정체를 숨기고 시민을 속이세요.",
   police: "밤마다 한 명을 조사해 마피아인지 알아낼 수 있습니다.",
-  doctor: "밤마다 한 명을 지목해 마피아의 공격으로부터 보호합니다.",
+  doctor: "밤마다 자신을 제외한 한 명을 지목해 마피아의 공격으로부터 보호합니다.",
   soldier: "마피아의 습격을 한 번 버텨냅니다. 능력은 자동으로 발동합니다.",
   citizen: "특별한 능력은 없지만 토론과 투표로 마피아를 찾아내야 합니다.",
 };

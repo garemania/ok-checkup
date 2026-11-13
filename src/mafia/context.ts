@@ -290,6 +290,13 @@ export function factsBlock(s: GameState): string {
     }
   }
 
+  const pairs = accusationPairs(s);
+  if (pairs.length) {
+    const seen = new Set<string>();
+    const items = pairs.filter((x) => { const k = `${x.by}-${x.target}-${x.day}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(-14);
+    lines.push(`누가 누구를 의심·지목·투표했는지(실제로 있었던 것만): ${items.map((x) => `${s.players[x.by].name}→${s.players[x.target].name}(${x.day}일차)`).join(", ")}`);
+  } else lines.push("누가 누구를 의심·지목·투표했는지: 아직 없음");
+
   const ded = deductions(s);
   if (ded.length) lines.push(`[공개된 사실만으로 확실한 것]\n- ${ded.join("\n- ")}`);
   return lines.join("\n");
@@ -543,4 +550,39 @@ export function fixSelfReference(text: string, name: string, informal: boolean):
   };
   const re = new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?:님|씨)?(이가|이는|이를|이도|이한테|이랑|이|가|은|는|을|를|의|도|에게|한테|께|랑|과|와)?(?![가-힣])`, "g");
   return text.replace(re, (_m, particle: string | undefined) => map[particle ?? ""] ?? I.base);
+}
+
+const ACCUSE_RE = /(의심|수상|마피아|찜찜|이상하|거짓|가짜|몰아|지목)/;
+const TRUST_WORDS = /(믿|시민 쪽|시민쪽|결백)/;
+
+/** 실제로 누가 누구를 의심·지목했는지 (대화와 투표에서) */
+export function accusationPairs(s: GameState): { by: number; target: number; day: number }[] {
+  const out: { by: number; target: number; day: number }[] = [];
+  for (const m of s.log) {
+    if (m.from === "system") {
+      if (!m.text.startsWith("투표 결과")) continue;
+      for (const line of m.text.split("\n")) {
+        const [a, b] = line.split(" → ");
+        const by = s.players.find((p) => p.name === a?.trim());
+        const t = s.players.find((p) => p.name === b?.trim());
+        if (by && t) out.push({ by: by.id, target: t.id, day: m.day });
+      }
+      continue;
+    }
+    if (!ACCUSE_RE.test(m.text) || TRUST_WORDS.test(m.text)) continue;
+    for (const p of s.players) if (p.id !== m.from && m.text.includes(p.name)) out.push({ by: m.from, target: p.id, day: m.day });
+  }
+  return out;
+}
+
+/** "○○가 나를 몰았다/의심했다/찍었다"처럼 말했는데 실제 기록에 그런 일이 없으면 그 사람 id */
+export function fabricatedAccusation(s: GameState, speaker: number, text: string): number | null {
+  const pairs = accusationPairs(s);
+  for (const p of s.players) {
+    if (p.id === speaker) continue;
+    const esc = p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${esc}(?:님|씨)?(?:이|가|은|는)?[^.!?]{0,20}(?:나를|저를|날|절|나한테|저한테|저에게|나에게)[^.!?]{0,6}(?:몰|의심|지목|찍|투표|공격)`);
+    if (re.test(text) && !pairs.some((x) => x.by === p.id && x.target === speaker)) return p.id;
+  }
+  return null;
 }

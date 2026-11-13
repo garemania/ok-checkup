@@ -769,7 +769,8 @@ describe("auto-speech for the player, directed talk, in-world wording", () => {
     expect(on.proxy).toBe(true);
     expect(on.hint).toContain("[대리]");
     expect(on.hint).toContain("직업, 조사 결과");
-    for (let i = 0; i < 20; i++) expect(nextTurn(s, Math.random, { allowHuman: false })!.player.id).not.toBe(0);
+    // 자동 대사를 쓸 수 없으면 멈춰서 플레이어가 직접 답하게 한다
+    expect(nextTurn(s, Math.random, { allowHuman: false })).toBeNull();
   });
 
   it("sometimes lets the player chime in during free talk", async () => {
@@ -817,17 +818,29 @@ describe("auto-speech for the player, directed talk, in-world wording", () => {
 });
 
 describe("no circular conversations", () => {
-  it("breaks a two-person ping-pong by bringing in someone else", async () => {
+  it("lets two people finish their conversation, but breaks a very long back-and-forth", async () => {
     const { nextTurn } = await import("./director");
     let s = createGame("나");
-    s = addMsg(s, 7, "하은, 서연이 3일차 얘기 피하는 거 이상하지 않아?", "day");
+    s = addMsg(s, 7, "하은, 서연이 어제 얘기 피하는 거 이상하지 않아?", "day");
     s = addMsg(s, 3, "태오님, 저는 아직 판단이 조심스러워요.", "day");
-    s = addMsg(s, 7, "하은, 그래도 서연 얘기는 넘기기 어렵잖아.", "day");
-    for (let i = 0; i < 20; i++) {
+    s = addMsg(s, 7, "하은, 그래도 서연 얘기는 그냥 넘기기 어렵잖아.", "day");
+    // 둘이 대화 중이면 하은이 이어서 답한다 (다른 사람이 끼어들지 않음)
+    for (let i = 0; i < 10; i++) expect(nextTurn(s, Math.random, { allowHuman: true })!.player.id).toBe(3);
+    // 8마디를 넘기면 다른 사람이 끼어들어 화제를 돌린다
+    for (let k = 0; k < 5; k++) s = addMsg(s, k % 2 === 0 ? 3 : 7, k % 2 === 0 ? `태오님, 그건 아니에요 ${k}` : `하은, 다시 말해 봐 ${k}`, "day");
+    for (let i = 0; i < 10; i++) {
       const t = nextTurn(s, Math.random, { allowHuman: true })!;
       expect([7, 3]).not.toContain(t.player.id);
       expect(t.hint).toContain("[전환]");
     }
+  });
+
+  it("stops and waits when an AI asks the player and auto-speech is off", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 1, "나님, 어제 누구 찍었어요?", "day");
+    expect(nextTurn(s, Math.random, { allowHuman: false })).toBeNull();
+    expect(nextTurn(s, Math.random, { allowHuman: true })!.player.id).toBe(0);
   });
 
   it("asks to move on when one person's topic keeps coming up", async () => {
@@ -983,22 +996,14 @@ describe("goals, hidden roles, abstaining", () => {
       expect(await ai.vote(s, citizen)).toBeNull();
       expect(system).toContain("마피아 2명을 모두 찾아 처형해야 승리");
       expect(system).toContain("마피아끼리만 서로 안다");
-      expect(system).toContain("기권해도 된다");
+      expect(system).toContain("아무 단서가 없을 때만 기권");
       const mafia = s.players.find((p) => !p.isHuman && p.role === "mafia")!;
       await ai.vote(s, mafia);
       expect(system).toContain("마피아 수가 시민 팀 수와 같아지면 승리");
     } finally { globalThis.fetch = orig; }
   });
 
-  it("offline citizens abstain when there is no real suspect", async () => {
-    const ai = makeAI(DEFAULT_SETTINGS, () => {});
-    let abstain = 0;
-    for (let i = 0; i < 6; i++) {
-      const s = createGame("나");
-      for (const p of s.players.filter((x) => !x.isHuman && x.role !== "mafia")) if ((await ai.vote(s, p)) === null) abstain++;
-    }
-    expect(abstain).toBeGreaterThan(0);
-  }, 30000);
+
 });
 
 describe("in-app API self test", () => {
@@ -1046,12 +1051,15 @@ describe("obvious remarks, repeated interrogation, mentions vs addressing", () =
 });
 
 describe("abstain when unsure", () => {
-  it("offline citizens abstain on a day with no evidence at all", async () => {
+  it("offline AIs vote on a hunch most of the time instead of abstaining", async () => {
     const ai = makeAI(DEFAULT_SETTINGS, () => {});
-    for (let i = 0; i < 3; i++) {
+    let votes = 0;
+    let total = 0;
+    for (let i = 0; i < 4; i++) {
       const s = createGame("나");
-      for (const p of s.players.filter((x) => !x.isHuman && x.role !== "mafia")) expect(await ai.vote(s, p)).toBeNull();
+      for (const p of s.players.filter((x) => !x.isHuman)) { total++; if ((await ai.vote(s, p)) !== null) votes++; }
     }
+    expect(votes / total).toBeGreaterThan(0.6);
   }, 30000);
 
   it("but they do vote when there is a real reason", async () => {
@@ -1066,13 +1074,17 @@ describe("abstain when unsure", () => {
     expect(votedTarget).toBeGreaterThan(0);
   }, 30000);
 
-  it("a low-confidence model vote becomes an abstention", async () => {
+  it("a model vote with a small hunch counts; only near-zero confidence abstains", async () => {
     const orig = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"vote": 3, "confidence": 40, "reason": "그냥 느낌"}' }] } }] }), { status: 200 })) as typeof fetch;
+    let reply = '{"vote": 3, "confidence": 15, "reason": "조금 걸림"}';
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: reply }] } }] }), { status: 200 })) as typeof fetch;
     try {
       const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
       const s = createGame("나");
-      expect(await ai.vote(s, s.players.find((p) => !p.isHuman && p.role !== "mafia")!)).toBeNull();
+      const voter = s.players.find((p) => !p.isHuman && p.role !== "mafia" && p.id !== 3)!;
+      expect(await ai.vote(s, voter)).toBe(3);
+      reply = '{"vote": 3, "confidence": 5, "reason": "모르겠음"}';
+      expect(await ai.vote(s, voter)).toBeNull();
     } finally { globalThis.fetch = orig; }
   });
 });
@@ -1224,6 +1236,45 @@ describe("never refer to yourself by your own name", () => {
       const s = createGame("나");
       const said = await ai.speak(s, s.players[7]);
       expect(said.text).toBe("지후가 말한 것처럼 나한테 되묻는 것도 봐야지.");
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("doctor cannot protect self", () => {
+  it("offline doctor never picks themselves", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    for (let i = 0; i < 10; i++) {
+      const s = createGame("나");
+      const doc = s.players.find((p) => p.role === "doctor")!;
+      expect(await ai.nightTarget(s, doc, "protect")).not.toBe(doc.id);
+    }
+  }, 30000);
+});
+
+describe("no made-up accusations", () => {
+  it("knows who really accused or voted whom", async () => {
+    const { fabricatedAccusation, factsBlock } = await import("./context");
+    let s = { ...createGame("나"), day: 4 };
+    s = addMsg(s, 2, "하은이 좀 수상해", "day");
+    s = addMsg(s, "system", "투표 결과\n민재 → 하은\n\n하은 1표", "vote");
+    expect(fabricatedAccusation(s, 3, "서연님이 어제 제일 강하게 나를 몰았던 사람인데 무섭네요")).toBe(1);
+    expect(fabricatedAccusation(s, 3, "도윤님이 저를 의심했잖아요")).toBeNull();
+    expect(fabricatedAccusation(s, 3, "민재님이 저한테 투표했죠")).toBeNull();
+    expect(factsBlock(s)).toContain("도윤→하은(4일차)");
+    expect(factsBlock(s)).toContain("민재→하은(4일차)");
+  });
+
+  it("rewrites a line that invents an accusation", async () => {
+    const orig = globalThis.fetch;
+    const replies = ["[scared] 서연님이 어제 제일 강하게 나를 몰았던 사람인데 무섭네요.", "[scared] 서연님이 당하다니 무섭네요. 도윤님은 어젯밤 얘기 좀 해 주세요."];
+    let n = 0;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: replies[Math.min(n++, 1)] }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      const said = await ai.speak(s, s.players[3]);
+      expect(n).toBe(2);
+      expect(said.text).toContain("도윤님은 어젯밤");
     } finally { globalThis.fetch = orig; }
   });
 });

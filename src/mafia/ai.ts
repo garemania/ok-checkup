@@ -1,6 +1,6 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, fixSelfReference, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, fabricatedAccusation, fixSelfReference, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -129,7 +129,7 @@ const RULEBOOK = `[게임 규칙 전체]
 3. 직업과 그 한계:
  - 마피아: 동료를 알고 있다. 밤마다 시민 팀 1명을 살해한다. 낮에는 시민인 척 연기하며 경찰/의사를 사칭해도 된다.
  - 경찰: 밤마다 1명을 조사해 그 사람이 "마피아인지 아닌지"만 알 수 있다. 정확한 직업(의사/군인/시민)은 알 수 없다. 대화에서 "X는 시민이다"라고 보고하면 "조사했더니 X는 마피아가 아니었다"는 뜻이다. 진짜 경찰은 단 1명이다.
- - 의사: 밤마다 1명을 보호한다(자기 자신 가능). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
+ - 의사: 밤마다 자기 자신을 제외한 1명을 보호한다(자기 자신은 보호할 수 없다). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
  - 군인: 마피아의 습격을 한 번 버틴다.
  - 시민: 특별한 능력이 없다.
 4. 죽음:
@@ -160,10 +160,11 @@ const RULEBOOK = `[게임 규칙 전체]
  - 당연한 사실(마피아는 시민 팀을 노린다, 밤에는 누군가 죽을 수 있다 등)을 새로운 발견처럼 말하지 않는다. 의미 있는 추리를 한다(예: "도윤이 어제 태오를 의심했는데 바로 당했다").
  - 질문을 받으면 첫 문장에서 바로 답한다(예/아니오, 이유, 누구인지). 모르면 모른다고 분명히 말한다. 질문에 질문으로 답하거나 다른 사람 얘기로 넘기지 않는다. 다른 사람끼리의 질문에도 답이 안 나왔다면 대신 끼어들어 흐리지 말고 답을 기다리거나 그 질문을 정확히 짚는다.
  - 겉도는 말("정리하자", "지켜보자", "시간만 간다")만 하지 않는다. 누구를, 왜(어떤 말·투표·주장 때문에) 의심하거나 믿는지 구체적으로 말한다.
+ - "○○가 나를 몰았다/의심했다/찍었다"처럼 과거 일을 말할 때는 실제로 있었던 일만 말한다([지금까지 일어난 일]의 의심·지목·투표 목록 기준). 없었던 일을 지어내지 않는다.
  - 같은 사람에게 같은 내용으로 다시 추궁하지 않는다. 이미 물었고 답이 나왔으면, 그 답을 평가하거나 새 근거를 대거나 다른 이야기로 넘어간다.
  - 누가 정보를 공개했다는 이유만으로 의심하지 않는다. 주장이 공개된 사실과 맞으면 일단 그럴듯하게 받아들이고, 반박할 근거(맞서는 주장, 사실과의 모순)가 있을 때만 의심한다. 말을 했다고 몰아가지 말고, 같은 사람을 근거 없이 계속 몰아붙이지 않는다.
 8. 목표와 정보: 시민 팀(경찰, 의사, 군인, 시민)은 마피아를 모두 찾아 처형해야 이긴다. 마피아는 정체를 숨기고 시민 팀을 줄여 수가 같아지면 이긴다. 다른 사람의 직업은 아무도 모른다(마피아끼리만 서로 안다). AI든 사람이든 모두 같은 조건이니, 직업을 아는 척하지 말고 대화와 사실로 추리한다.
-9. 투표: 확실히 의심 가는 사람이 없으면 기권해도 된다. 근거 없이 아무나 찍지 않는다. 의심 가는 사람이 있으면 그 이유를 바탕으로 투표한다.
+9. 투표: 조금이라도(10% 정도라도) 의심 가는 사람이 있으면 그중 가장 의심되는 사람에게 투표한다. 정말 아무 단서가 없을 때만 기권한다.
 7. 추리하며 말하기: [당신의 추리 메모]와 [공개된 사실만으로 확실한 것]을 근거로, 지금 진행 상황(며칠째, 누가 죽었고 누가 무엇을 주장했는지)에 맞춰 추리를 드러내며 말한다. 예: "어젯밤 의사가 살린 사람이 서연이라면 서연은 표적이었으니 마피아는 아니겠네", "경찰 주장이 둘이니 한 명은 가짜다". 단, 당신만 아는 비공개 정보(직업, 조사 결과, 동료)를 밝힐지는 전략적으로 판단한다.
  - 마피아라면 겉으로는 이 원칙을 따르는 척하며 시민 팀의 신뢰를 얻는다.`;
 
@@ -271,10 +272,10 @@ async function askTarget(settings: Settings, s: GameState, p: Player, cands: num
   const shape = key === "vote" ? `{"vote": <후보의 id 숫자 또는 null>, "confidence": <0~100>, "reason": "짧은 이유"}` : `{"${key}": <후보의 id 숫자>, "reason": "짧은 이유"}`;
   const prompt = `${stateBlock(s, p)}\n\n${task}\n후보(id:이름): ${list}\n반드시 JSON 한 줄만 출력: ${shape}`;
   const first = await callLLM(settings, systemPrompt(s, p), prompt, 200);
-  // 투표는 확신이 낮으면(60 미만) 기권으로 본다
+  // 투표는 확신이 10 미만(사실상 단서 없음)일 때만 기권으로 본다
   if (key === "vote") {
     const conf = first.match(/"confidence"\s*:\s*(\d+)/);
-    if (conf && Number(conf[1]) < 60) return null;
+    if (conf && Number(conf[1]) < 10) return null;
   }
   const r1 = parseTarget(first, cands, names);
   if (r1 !== undefined) return r1;
@@ -309,6 +310,8 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
     if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
     const dead = addressesDead(s, text, p.id);
     out.push(...ruleViolations(text));
+    const fake = fabricatedAccusation(s, p.id, text);
+    if (fake !== null) out.push(`${s.players[fake].name}이(가) 당신을 의심하거나 지목하거나 투표한 적은 실제로 없습니다. 있지도 않은 일을 말하지 마세요. [지금까지 일어난 일]의 "누가 누구를 의심·지목·투표했는지"에 있는 것만 말하세요.`);
     const asked = task.match(/\[응답\][^"]*"([^"]+)"/)?.[1];
     if (asked && /\?|왜|누구|뭐|무슨|어떻게|는지|나요|까요/.test(asked) && isEvasive(s, p.id, asked, text))
       out.push(`질문("${asked}")에 답하지 않았습니다. 첫 문장에서 바로 답하세요(예/아니오, 이유, 누구인지). 모르면 모른다고 하세요. 되묻거나 다른 사람 얘기로 넘기지 마세요.`);
@@ -352,11 +355,11 @@ ${EMOTION_RULE}`;
     vote: (s, p) =>
       safe(async () => {
         const cands = alive(s).filter((x) => x.id !== p.id).map((x) => x.id);
-        return askTarget(settings, s, p, cands, "투표 시간입니다. 기본은 기권(vote에 null)입니다. 마피아라고 볼 분명한 근거(반박 없는 경찰 보고, 드러난 거짓말·모순, 공개된 사실과 맞지 않는 주장)가 있을 때만 그 사람을 고르세요. 누군지 잘 모르겠으면 반드시 기권하세요. confidence(0~100)에 확신 정도를 적으세요.", "vote");
+        return askTarget(settings, s, p, cands, "투표 시간입니다. 조금이라도(10% 정도라도) 마피아 같다는 느낌이 드는 사람이 있으면 그중 가장 의심되는 사람에게 투표하세요. 정말 아무 단서도 없을 때만 기권(vote에 null)하세요. confidence(0~100)에 확신 정도를 적으세요.", "vote");
       }, () => mock.vote(s, p)),
     nightTarget: (s, p, kind) =>
       safe(async () => {
-        const cands = alive(s).filter((x) => (kind === "protect" ? true : x.id !== p.id) && !(kind === "kill" && x.role === "mafia")).map((x) => x.id);
+        const cands = alive(s).filter((x) => x.id !== p.id && !(kind === "kill" && x.role === "mafia")).map((x) => x.id);
         const verb = { kill: "살해할", protect: "보호할", investigate: "조사할" }[kind];
         const r = await askTarget(settings, s, p, cands, `밤입니다. ${verb} 사람을 고르세요.`, "target");
         if (r === null) throw new Error("target parse: null");
@@ -665,8 +668,9 @@ function makeMockAI(): AI {
       await wait(150 + Math.random() * 250);
       const sc = suspicion(s, p);
       const t = top(sc);
-      // 누군지 모르면 기권: 기본 점수는 0~2의 무작위이므로, 지목·조사 보고 같은 실제 근거로 점수가 2.4 이상 올라간 사람에게만 투표한다
-      if (t === null || sc[t] < 2.4) return p.role === "mafia" && t !== null && Math.random() < 0.3 ? t : null;
+      // 조금이라도 의심이 가면 투표한다. 가장 의심되는 사람의 점수가 아주 낮을 때(단서가 거의 없을 때)만 기권
+      if (t === null) return null;
+      if (p.role !== "mafia" && sc[t] < 1.4) return null;
       return t;
     },
     async nightTarget(s, p, kind) {
@@ -678,8 +682,10 @@ function makeMockAI(): AI {
         return (claimers.length ? pick(claimers) : pick(t)).id;
       }
       if (kind === "protect") {
-        const claimers = pool.filter((x) => s.log.some((m) => m.from === x.id && /제가 경찰/.test(m.text)));
-        return (claimers.length ? pick(claimers) : Math.random() < 0.3 ? p : pick(pool.filter((x) => x.id !== p.id))).id;
+        // 의사는 자기 자신을 보호할 수 없다
+        const others = pool.filter((x) => x.id !== p.id);
+        const claimers = others.filter((x) => s.log.some((m) => m.from === x.id && /제가 경찰/.test(m.text)));
+        return (claimers.length ? pick(claimers) : pick(others)).id;
       }
       const done = (s.policeLog[p.id] ?? []).map((r) => r.target);
       const t = pool.filter((x) => x.id !== p.id && !done.includes(x.id));

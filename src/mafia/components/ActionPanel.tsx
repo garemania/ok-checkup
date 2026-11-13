@@ -35,7 +35,7 @@ interface Props {
 
 const NIGHT_TEXT = {
   mafia: { title: "오늘 밤 제거할 사람을 고르세요", cta: "살해 확정" },
-  doctor: { title: "오늘 밤 보호할 사람을 고르세요 (본인 가능)", cta: "보호 확정" },
+  doctor: { title: "오늘 밤 보호할 사람을 고르세요 (본인은 보호할 수 없음)", cta: "보호 확정" },
   police: { title: "오늘 밤 조사할 사람을 고르세요", cta: "조사 확정" },
 } as const;
 
@@ -129,7 +129,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
       <div className="space-y-3 p-4">
         <p className="flex items-center gap-1.5 text-sm font-medium"><RoleIcon role={me.role} />{cfg.title}</p>
         {me.role === "mafia" && <p className="text-xs text-muted-foreground">동료 얼굴을 눌러 1:1로 작전을 상의할 수 있습니다.</p>}
-        <TargetPicker includeSelf={me.role === "doctor"} excludeMafia />
+        <TargetPicker includeSelf={false} excludeMafia />
         <Button className="w-full" disabled={target === null} onClick={() => { onNight(target!); setTarget(null); }}>{cfg.cta}</Button>
       </div>
     );
