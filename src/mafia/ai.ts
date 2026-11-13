@@ -1,5 +1,5 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
-import { factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, detectClaims, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -129,7 +129,11 @@ const RULEBOOK = `[게임 규칙 전체]
  - 의사: 밤마다 1명을 보호한다(자기 자신 가능). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
  - 군인: 마피아의 습격을 한 번 버틴다.
  - 시민: 특별한 능력이 없다.
-4. 직업 주장과 조사 보고를 해석하는 법:
+4. 죽음:
+ - 죽은 사람은 더 이상 말하지도, 대답하지도, 투표하지도, 능력을 쓰지도 못한다. 죽은 사람에게 질문하거나 대답·해명을 요구하지 않는다. 대화는 살아 있는 사람끼리만 한다.
+ - 죽은 사람이 살아 있을 때 한 말과 투표는 그대로 증거로 쓸 수 있다("서연이 생전에 ~라고 했다"처럼 과거형으로 말한다).
+ - 처형된 사람은 직업이 공개되고, 밤에 살해된 사람은 직업이 공개되지 않는다. 사망자 수와 경위는 [핵심 사실]의 "사망자"를 기준으로 말하고, 틀리게 말하지 않는다(예: 누가 죽었는데 "아무도 안 죽었다"고 하지 않는다).
+5. 직업 주장과 조사 보고를 해석하는 법:
  - "저는 경찰이고 A를 조사했더니 시민(마피아 아님)이었다"는 "A는 마피아가 아니다"라는 경찰의 조사 보고다. 진짜 경찰이면 사실이고, 가짜 경찰(마피아나 거짓말하는 시민)이면 거짓일 수 있다. 직업 주장은 증명이 아니다.
  - 경찰을 주장하는 사람이 2명 이상이면 적어도 한 명은 가짜다.
  - 진위 판단의 열쇠: 진짜 경찰이 마피아를 조사하면 반드시 "마피아"로 나온다. 따라서 A가 실제 마피아인데 "A는 마피아가 아니다"라고 보고한 사람은 진짜 경찰이 아니다. 반대로 A가 실제 시민 팀인데 "A는 마피아다"라고 보고한 사람도 진짜 경찰이 아니다. 당신은 자기 자신의 실제 직업을 알고 있으므로, 자신이 조사 대상으로 보고되면 그 보고가 사실과 맞는지 바로 알 수 있다.
@@ -141,7 +145,13 @@ const RULEBOOK = `[게임 규칙 전체]
  - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.
  - [핵심 사실]이나 기록에 이미 나온 조사 보고(대상과 결과)를 두고 "누구를 조사했냐", "결과가 뭐냐"고 다시 묻지 않는다. 그 보고를 사실로 받아들일지 거짓으로 볼지를 판단해 반응한다.
  - "언제 조사했냐"는 따질 필요가 없다. 경찰은 매 밤 한 명씩 조사하므로 보고된 조사는 지난밤(들) 중 하나에 한 것이다. 조사 횟수가 지난 밤의 수보다 많을 때만 모순이다.
- - 플레이어가 "말했잖아", "아까 말했지" 등으로 이전 발언을 가리키면 기록에서 그 발언을 찾아 이어서 이해한다.`;
+ - 플레이어가 "말했잖아", "아까 말했지" 등으로 이전 발언을 가리키면 기록에서 그 발언을 찾아 이어서 이해한다.
+6. 믿음과 의심의 균형:
+ - 모든 것을 의심하지 않는다. 근거가 있으면 믿는다. 예: 맞서는 주장이 없는 경찰 주장, 공개된 사실과 맞아떨어지는 보고, 처형으로 직업이 확인된 일, 일관된 투표와 발언.
+ - 믿을 때는 "~이니까 일단 믿겠다", "~님은 시민 쪽으로 본다"처럼 이유와 함께 분명히 말하고, 믿는 사람과 힘을 합쳐 다른 용의자를 찾는다.
+ - 의심할 때도 구체적인 근거(모순, 주장 충돌, 투표 기록, 공개된 직업과의 불일치)를 댄다. 근거 없는 의심을 반복하지 않는다.
+ - [공개 정보로 확실히 말할 수 있는 것]에 있는 추론은 사실로 받아들인다.
+ - 마피아라면 겉으로는 이 원칙을 따르는 척하며 시민 팀의 신뢰를 얻는다.`;
 
 function privateKnowledge(s: GameState, p: Player): string {
   const lines: string[] = [`당신의 직업: ${ROLE_LABEL[p.role]}`];
@@ -190,8 +200,8 @@ function stateBlock(s: GameState, p: Player): string {
   const living = alive(s).map((x) => `${x.id}:${x.name}`).join(", ");
   const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})` : `${p.name}(당신)`}: ${m.text}`).join("\n");
   return `[현재] ${s.day}일차 (${s.phase === "night" ? "밤" : s.phase === "vote" ? "투표" : s.phase === "trial" ? "재판" : "낮"})
-생존자(id:이름): ${living}
-[핵심 사실]
+생존자(id:이름, 투표·지목은 이 중에서만): ${living}
+[핵심 사실 - 진행자가 정리한 상황판]
 ${factsBlock(s)}
 [공개 대화 기록] (최근 순서대로, "(당신)"이 붙은 줄이 당신의 발언)
 ${transcriptFor(s, p) || "(아직 없음)"}
@@ -261,17 +271,20 @@ export interface AI {
 
 const EMOTION_RULE = `발언 맨 앞에 지금 표정을 [감정] 태그로 붙이세요. 감정은 neutral, happy, angry, sad, surprised, suspicious, scared, smug 중 하나입니다. 예: [suspicious] 서연, 아까 말이 좀 이상했어.`;
 
-/** 발언 생성. 자기 자신을 3인칭으로 부르는 문장이 나오면 한 번 다시 쓰게 한다 */
+/** 발언 생성. 규칙에 어긋나는 대사(자기 이름을 3인칭으로 부름, 죽은 사람에게 말을 걺)는 한 번 다시 쓰게 한다 */
 async function askSpoken(settings: Settings, s: GameState, p: Player, task: string): Promise<Spoken> {
   const prompt = `${stateBlock(s, p)}\n\n${task}`;
+  const problems = (text: string): string[] => {
+    const out: string[] = [];
+    if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
+    const dead = addressesDead(s, text, p.id);
+    if (dead !== null) out.push(`${s.players[dead].name}은(는) 이미 사망해서 말도 대답도 할 수 없습니다. 죽은 사람에게 묻거나 대답을 요구하지 말고 살아 있는 사람에게 말하세요. (생전의 발언을 근거로 언급하는 것은 괜찮습니다.)`);
+    return out;
+  };
   let spoken = parseSpoken(clean(await callLLM(settings, systemPrompt(s, p), prompt, 200), p.name));
-  if (speaksOfSelf(spoken.text, p.name)) {
-    const again = await callLLM(
-      settings,
-      systemPrompt(s, p),
-      `${prompt}\n\n[주의] 방금 쓴 답변 "${spoken.text}"은(는) 당신 자신(${p.name})을 이름으로 불러 어색합니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하고, 직전 발언에 맞게 다시 쓰세요.`,
-      200,
-    );
+  const issues = problems(spoken.text);
+  if (issues.length) {
+    const again = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[다시 쓰기] 방금 쓴 답변 "${spoken.text}"에는 문제가 있습니다:\n- ${issues.join("\n- ")}\n직전 발언과 [핵심 사실]에 맞게 다시 쓰세요.`, 200);
     spoken = parseSpoken(clean(again, p.name));
   }
   return spoken;
@@ -377,9 +390,29 @@ function suspicion(s: GameState, viewer: Player): Record<number, number> {
     });
     if (viewer.role === "mafia" && /(경찰|조사)/.test(m.text) && /(제가|내가|저는)/.test(m.text) && sc[m.from] !== undefined) sc[m.from] += 3;
   });
+  // 공개된 조사 보고 반영: 경찰 주장이 하나뿐이면 보고를 꽤 믿고, 둘 이상이면 덜 믿는다
+  const claims = detectClaims(s);
+  const policeClaimers = Object.entries(claims).filter(([, r]) => r === "police").map(([id]) => Number(id)).filter((id) => s.players[id].alive);
+  for (const r of detectReports(s)) {
+    if (r.target === viewer.id) {
+      // 나에 대한 보고: 사실과 다르면 보고자는 가짜 경찰
+      const truth = viewer.role === "mafia" ? "mafia" : "clean";
+      if (truth !== r.result && sc[r.by] !== undefined) sc[r.by] += viewer.role === "mafia" ? 1 : 4;
+      continue;
+    }
+    if (viewer.role === "police" && r.by !== viewer.id && sc[r.by] !== undefined) { sc[r.by] += 4; continue; } // 진짜 경찰이 보기엔 가짜
+    const weight = policeClaimers.length <= 1 ? 2.5 : 1;
+    if (sc[r.target] !== undefined) sc[r.target] += r.result === "mafia" ? weight : -weight;
+  }
   if (viewer.role === "mafia") mafiaPartners(s, viewer.id).forEach((pt) => { if (sc[pt.id] !== undefined) sc[pt.id] -= 100; });
   return sc;
 }
+
+/** 가장 믿을 만한 사람 (의심 점수가 가장 낮은 생존자) */
+const least = (sc: Record<number, number>): number | null => {
+  const e = Object.entries(sc).sort((a, b) => a[1] - b[1]);
+  return e.length ? Number(e[0][0]) : null;
+};
 
 const top = (sc: Record<number, number>): number | null => {
   const e = Object.entries(sc).sort((a, b) => b[1] - a[1]);
@@ -484,6 +517,15 @@ function makeMockAI(): AI {
       if (s.day === 1 && s.round <= 1 && s.log.filter((m) => m.from !== "system").length < 3) {
         if (taeo) return taeoLine("first", tn);
         return pick(["첫날이라 단서가 없네요. 일단 다들 의견부터 들어봐요.", "자, 일단 서로 얘기해보자. 누가 먼저 말해볼래?", "정보가 없으니 말투와 반응을 잘 봐야겠어요."]);
+      }
+      // 가끔은 믿는 사람을 밝힌다 (모두를 의심하지 않도록)
+      const partners = new Set(mafiaPartners(s, p.id).map((x) => x.id));
+      const trusted = least(Object.fromEntries(Object.entries(sc).filter(([id]) => !partners.has(Number(id))))); // 마피아는 동료를 감싸지 않는다
+      if (trusted !== null && (sc[trusted] < -1 || Math.random() < 0.3)) {
+        const t2 = nameOf(s, trusted);
+        return pick(formal
+          ? [`저는 ${t2}님은 믿어도 된다고 봐요. 지금까지 말이 일관됐거든요. 다른 분들을 보죠.`, `${t2}님은 시민 쪽으로 보고 있어요. 의심은 다른 쪽에 두겠습니다.`]
+          : [`난 ${t2}는 믿는다. 말이 계속 일관됐어. 딴 사람을 보자.`, `${t2}는 시민 쪽 같아. 의심은 다른 데 두자.`]);
       }
       if (taeo) return taeoLine("suspect", tn);
       const lines = formal

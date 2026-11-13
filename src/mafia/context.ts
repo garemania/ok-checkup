@@ -82,8 +82,8 @@ export function transcriptFor(s: GameState, viewer: Player, limit = 40): string 
       const who =
         m.from === "system" ? "[진행]"
         : m.from === viewer.id ? `${viewer.name}(당신)`
-        : m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})`
-        : s.players[m.from].name;
+        : m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})${s.players[HUMAN_ID].alive ? "" : "(현재 사망)"}`
+        : `${s.players[m.from].name}${s.players[m.from].alive ? "" : "(현재 사망)"}`;
       let body = m.from === "system" ? m.text.replace(/\n+/g, " / ") : m.text;
       if (m.from === HUMAN_ID) {
         const n = normalizeHuman(m.text, s.players);
@@ -182,19 +182,32 @@ export function meaningSummary(s: GameState, m: ChatMsg): string | undefined {
   return meaningsInOrder(s).find((x) => x.m.id === m.id)?.meaning.summary;
 }
 
-/** 전체 기록에서 뽑은 핵심 사실 (최근 대화 40줄에서 밀려나도 잊지 않도록) */
+const deathText = (p: Player) =>
+  p.death
+    ? `${p.death.day}일차 ${p.death.cause === "executed" ? `처형, 직업 공개: ${ROLE_LABEL[p.role]}` : "밤에 마피아에게 살해, 직업 비공개"}`
+    : "사망";
+
+/**
+ * 진행자가 정리해 주는 상황판 (모든 AI에게 같은 공개 정보).
+ * 생존/사망, 직업 주장, 조사 보고, 사건, 투표 기록, 그리고 공개 정보만으로 할 수 있는 추론.
+ */
 export function factsBlock(s: GameState): string {
   const lines: string[] = [];
-  if (s.day >= 1) lines.push("규칙 확인: 첫 밤에도 경찰 조사는 가능하다(첫 밤에 없는 것은 마피아의 살해뿐).");
-  const dead = s.players.filter((p) => !p.alive).map((p) => `${p.name}${p.revealed ? `(${ROLE_LABEL[p.role]} 공개)` : "(직업 비공개)"}`);
-  lines.push(`사망자: ${dead.join(", ") || "없음"}`);
-
+  const living = s.players.filter((p) => p.alive);
+  const dead = s.players.filter((p) => !p.alive);
   const claims = detectClaims(s);
-  const claimText = Object.entries(claims).map(([id, r]) => `${s.players[Number(id)].name}=${ROLE_LABEL[r]} 주장`);
-  lines.push(`직업 주장: ${claimText.join(", ") || "아직 없음"}`);
+  const reports = detectReports(s);
 
-  const reports = detectReports(s).map((r) => `${s.players[r.by].name}이(가) ${s.players[r.target].name}을(를) 조사했다며 "${r.result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)"}"으로 보고(${r.day}일차 발언)`);
-  if (reports.length) lines.push(`조사 보고(대상과 결과가 이미 공개됨, 다시 묻지 말 것. 직업 주장은 증명이 아님): ${reports.join(" / ")}`);
+  lines.push(`생존자(${living.length}명, 이 사람들만 말하고 투표할 수 있음): ${living.map((p) => p.name + (claims[p.id] ? `(${ROLE_LABEL[claims[p.id]]} 주장)` : "")).join(", ")}`);
+  lines.push(`사망자(${dead.length}명, 이미 죽어서 말도 대답도 투표도 못 함. 말을 걸지 말 것): ${dead.map((p) => `${p.name}(${deathText(p)})`).join(", ") || "없음"}`);
+  lines.push("규칙 확인: 첫 밤에도 경찰 조사는 가능하다(첫 밤에 없는 것은 마피아의 살해뿐). 밤에 살해된 사람의 직업은 공개되지 않는다.");
+
+  if (reports.length)
+    lines.push(
+      `조사 보고(대상과 결과가 이미 공개됨, 다시 묻지 말 것. 직업 주장은 증명이 아님): ${reports
+        .map((r) => `${s.players[r.by].name}이(가) ${s.players[r.target].name}을(를) 조사했다며 "${r.result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)"}"으로 보고(${r.day}일차 발언)`)
+        .join(" / ")}`,
+    );
 
   for (const m of s.log) {
     if (m.from !== "system") continue;
@@ -209,7 +222,46 @@ export function factsBlock(s: GameState): string {
       lines.push(`${m.day}일차 찬반: ${tail}`);
     }
   }
+
+  const ded = deductions(s);
+  if (ded.length) lines.push(`[공개 정보로 확실히 말할 수 있는 것]\n- ${ded.join("\n- ")}`);
   return lines.join("\n");
+}
+
+/** 공개 정보만으로 끌어낼 수 있는 확실한 추론 (모든 AI 공통) */
+export function deductions(s: GameState): string[] {
+  const out: string[] = [];
+  const claims = detectClaims(s);
+  const reports = detectReports(s);
+  const police = Object.entries(claims).filter(([, r]) => r === "police").map(([id]) => Number(id));
+  const alivePolice = police.filter((id) => s.players[id].alive);
+
+  if (alivePolice.length >= 2) out.push(`경찰을 주장하는 생존자가 ${alivePolice.map((id) => s.players[id].name).join(", ")} 둘 이상이다. 진짜 경찰은 1명이므로 적어도 한 명은 가짜다.`);
+  if (alivePolice.length === 1 && police.length === 1) out.push(`경찰을 주장한 사람은 ${s.players[alivePolice[0]].name} 한 명뿐이고 아직 맞서는 경찰 주장이 없다. 반박이 없고 보고가 공개된 사실과 어긋나지 않으면 믿을 근거가 된다.`);
+
+  // 처형으로 공개된 직업과 어긋나는 보고/주장 -> 거짓말 확정
+  for (const r of reports) {
+    const t = s.players[r.target];
+    if (!t.revealed) continue;
+    const truth = t.role === "mafia" ? "mafia" : "clean";
+    if (truth !== r.result) out.push(`${s.players[r.by].name}은(는) ${t.name}을(를) "${r.result === "mafia" ? "마피아" : "마피아 아님"}"이라 보고했지만, 처형으로 ${t.name}의 직업이 ${ROLE_LABEL[t.role]}로 공개되었다. ${s.players[r.by].name}의 경찰 주장은 거짓이다.`);
+    else out.push(`${s.players[r.by].name}의 ${t.name} 조사 보고는 처형으로 공개된 직업과 일치한다. ${s.players[r.by].name}의 경찰 주장에 힘이 실린다.`);
+  }
+  for (const [idStr, role] of Object.entries(claims)) {
+    const p = s.players[Number(idStr)];
+    if (p.revealed && p.role !== role) out.push(`${p.name}은(는) ${ROLE_LABEL[role]}라고 주장했지만 처형으로 ${ROLE_LABEL[p.role]}로 공개되었다. 거짓 주장이었다.`);
+  }
+  // 같은 직업을 처형으로 공개된 사람이 이미 가졌다면 그 직업을 주장한 다른 사람은 가짜 (마피아 제외, 경찰/의사/군인은 1명)
+  for (const p of s.players.filter((x) => x.revealed && ["police", "doctor", "soldier"].includes(x.role))) {
+    for (const [idStr, role] of Object.entries(claims)) {
+      const c = Number(idStr);
+      if (c !== p.id && role === p.role) out.push(`진짜 ${ROLE_LABEL[p.role]}였던 ${p.name}이(가) 처형으로 공개되었으므로, 같은 직업을 주장한 ${s.players[c].name}은(는) 가짜다.`);
+    }
+  }
+  // 마피아 공개 수
+  const mafiaDead = s.players.filter((p) => p.revealed && p.role === "mafia").length;
+  out.push(`처형으로 확인된 마피아: ${mafiaDead}명. 남은 마피아: ${2 - mafiaDead}명.`);
+  return out;
 }
 
 /** 지금 답해야 할 흐름: 직전 발언과, 이 AI에게 향한 말 */
@@ -245,5 +297,17 @@ export function addresseeOf(s: GameState, m: ChatMsg): number | null {
 /** 자기 자신을 이름(3인칭)으로 부르는 어색한 문장인지 검사. "저 서연은 ..."처럼 1인칭 자기소개는 허용 */
 export function speaksOfSelf(text: string, name: string): boolean {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<!저\\s)(?<![가-힣])${esc}(이|가|은|는|님|의|도)(?=[\\s,.!?~]|$)`).test(text);
+  return new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?![가-힣]{2})`).test(text);
+}
+
+/** 죽은 사람에게 말을 거는 문장이면 그 사람의 id */
+export function addressesDead(s: GameState, text: string, speaker: number): number | null {
+  const head = normalizeHuman(text, s.players).text;
+  for (const q of s.players) {
+    if (q.alive || q.id === speaker) continue;
+    const esc = q.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`${esc}\\s*(님|씨|아|야)?\\s*[,，]`).test(head)) return q.id;
+    if (new RegExp(`${esc}\\s*(님|씨)?[^.!?]{0,30}(말씀해|말해|알려|대답|해명해|설명해|주세요|해 봐|해봐|해 줘|해줘)`).test(head)) return q.id;
+  }
+  return null;
 }

@@ -26,6 +26,7 @@ export interface Player {
   isHuman: boolean;
   revealed: boolean; // 처형 등으로 직업 공개됨
   shield: boolean; // 군인의 방어 능력 남음
+  death?: { day: number; cause: "executed" | "killed" }; // 사망 시점과 경위
 }
 
 export interface ChatMsg {
