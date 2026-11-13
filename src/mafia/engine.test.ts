@@ -428,3 +428,57 @@ describe("rules awareness", () => {
     expect(claim.text).toMatch(/경찰은 (나|저)/);
   }, 30000);
 });
+
+describe("typo tolerance and first-night rule", () => {
+  it("fixes role-word typos in context but leaves normal words alone", async () => {
+    const { normalizeHuman } = await import("./context");
+    const players = createGame("나").players;
+    expect(normalizeHuman("저는 경창입니다", players).text).toBe("저는 경찰입니다");
+    expect(normalizeHuman("나 도사 돼", players).text).toBe("나 의사 돼");
+    expect(normalizeHuman("서현님은 시민이에요", players).text).toBe("서연님은 시민이에요");
+    expect(normalizeHuman("나 시간 없어", players).text).toBe("나 시간 없어");
+    expect(normalizeHuman("도사님 안녕", players).fixes).toEqual([]);
+  });
+
+  it("recognises sloppy claims but not objects or negations", async () => {
+    const { detectClaims } = await import("./context");
+    const claim = (text: string) => {
+      let s = createGame("나");
+      s = addMsg(s, 2, text);
+      return detectClaims(s)[2];
+    };
+    expect(claim("나 경창이다")).toBe("police");
+    expect(claim("난 의사야")).toBe("doctor");
+    expect(claim("나 도사 돼")).toBe("doctor");
+    expect(claim("나는 시민을 믿어")).toBeUndefined();
+    expect(claim("나 시민 아니야")).toBeUndefined();
+  });
+
+  it("shows the AI the typo correction and the first-night rule", async () => {
+    const { transcriptFor, factsBlock } = await import("./context");
+    let s = createGame("나");
+    s = addMsg(s, 0, "서현님, 저는 경창입니다");
+    const t = transcriptFor(s, s.players[2]);
+    expect(t).toContain("오타 보정");
+    expect(t).toContain("서연님, 저는 경찰입니다");
+    expect(t).toContain("원문: 서현님, 저는 경창입니다");
+    expect(factsBlock(s)).toContain("첫 밤에도 경찰 조사는 가능");
+  });
+
+  it("includes both rules in the rulebook sent to the model", async () => {
+    const orig = globalThis.fetch;
+    let system = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      system = JSON.parse(init.body as string).systemInstruction.parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "[neutral] 네." }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      await ai.speak(s, s.players[1]);
+      expect(system).toContain("첫날 밤에 조사했다");
+      expect(system).toContain("오타");
+      expect(system).toContain("기록에 없는 발언");
+    } finally { globalThis.fetch = orig; }
+  });
+});

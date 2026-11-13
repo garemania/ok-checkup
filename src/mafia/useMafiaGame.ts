@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI } from "./ai";
 import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
+import { normalizeHuman } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
 import type { Emotion, GameState, Player, Role, Settings } from "./types";
@@ -100,7 +101,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setSpeaking(null);
     setTyping(null);
     setUnread({});
-    commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다. 첫 밤에는 살해가 없습니다.", "night"));
+    commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다. 첫 밤에는 마피아의 살해만 없고, 경찰 조사 같은 능력은 정상적으로 사용할 수 있습니다.", "night"));
   };
 
   const quit = () => {
@@ -216,7 +217,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setBusy(true);
     const cur = ref.current!;
     const me0 = cur.players[HUMAN_ID].name;
-    const mentioned = aliveAI(cur).filter((p) => text.includes(p.name));
+    const normalized = normalizeHuman(text, cur.players).text;
+    const mentioned = aliveAI(cur).filter((p) => normalized.includes(p.name));
     const others = aliveAI(cur).filter((p) => !mentioned.includes(p)).sort(() => Math.random() - 0.5);
     const responders = [...mentioned, ...others].slice(0, Math.max(2, mentioned.length));
     const ok = await respond(

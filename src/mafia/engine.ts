@@ -139,7 +139,7 @@ export function resolveNight(
     const inv = { target, isMafia: st.players[target].role === "mafia", day: st.day };
     st = { ...st, policeLog: { ...st.policeLog, [actor]: [...(st.policeLog[actor] ?? []), inv] } };
   }
-  if (st.day === 1) return { state: st, result: "첫 밤은 조용히 지나갔습니다. 마피아는 다음 밤부터 움직입니다." };
+  if (st.day === 1) return { state: st, result: "첫 밤은 조용히 지나갔습니다. 마피아의 습격은 없었습니다. (경찰 조사 같은 능력은 첫 밤에도 정상적으로 사용할 수 있습니다.)" };
   if (a.kill === null) return { state: st, result: "평화로운 밤이 지나갔습니다." };
   if (a.protect === a.kill) return { state: st, result: "마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다." };
   const victim = st.players[a.kill];
