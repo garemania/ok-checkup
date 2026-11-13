@@ -23,7 +23,7 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
     <button
       onClick={onClick}
       className={cn(
-        "group relative flex flex-col items-center gap-1 rounded-xl p-1.5 transition",
+        "group relative flex min-w-0 flex-col items-center gap-0.5 rounded-lg p-0.5 transition sm:gap-1 sm:rounded-xl sm:p-1.5",
         "hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         selected && "bg-primary/15 ring-2 ring-primary",
       )}
@@ -31,29 +31,30 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
     >
       <div
         className={cn(
-          "relative h-14 w-14 rounded-lg shadow-md transition sm:h-16 sm:w-16",
-          speaking && "ring-4 ring-primary ring-offset-2 ring-offset-background animate-pulse",
+          "relative aspect-square w-full max-w-11 rounded-md shadow-md transition sm:max-w-16 sm:rounded-lg",
+          isMe && "outline outline-2 outline-primary sm:outline-0",
+          speaking && "ring-2 ring-primary ring-offset-1 ring-offset-background animate-pulse sm:ring-4 sm:ring-offset-2",
           !p.alive && "opacity-60 grayscale",
         )}
       >
         <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg" rough />
-        {unread && <span className="absolute -right-0.5 top-0 h-3.5 w-3.5 rounded-full border-2 border-background bg-destructive" />}
+        {unread && <span className="absolute -right-0.5 top-0 h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 rounded-full border-2 border-background bg-destructive" />}
         {mark && (
-          <span className={cn("absolute -bottom-1 -left-1 rounded-full px-1 text-[10px] font-bold", mark === "mafia" ? "bg-destructive text-destructive-foreground" : "bg-success text-background")}>
+          <span className={cn("absolute -bottom-1 -left-1 rounded-full px-0.5 text-[8px] font-bold sm:px-1 sm:text-[10px]", mark === "mafia" ? "bg-destructive text-destructive-foreground" : "bg-success text-background")}>
             {mark === "mafia" ? "마피아" : "시민"}
           </span>
         )}
         {voteCount ? (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-bold text-primary-foreground">{voteCount}</span>
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground sm:h-5 sm:min-w-5 sm:text-xs">{voteCount}</span>
         ) : null}
       </div>
-      <div className="flex max-w-full items-center gap-0.5 truncate text-xs font-medium">
-        {isMe && <span className="rounded bg-primary px-1 text-[10px] text-primary-foreground">ME</span>}
+      <div className="flex max-w-full items-center gap-0.5 truncate text-[10px] font-medium sm:text-xs">
+        {isMe && <span className="hidden rounded bg-primary px-1 text-[10px] text-primary-foreground sm:inline">ME</span>}
         <span className={cn(!p.alive && "line-through text-muted-foreground")}>{p.name}</span>
       </div>
-      <div className="h-4 text-[11px] text-muted-foreground">
-        {showRole ? <span className="inline-flex items-center gap-0.5"><RoleIcon role={p.role} className="h-3 w-3" />{ROLE_LABEL[p.role]}</span> : p.alive ? "생존" : "사망"}
-        {votedByMe && " (투표)"}
+      <div className="h-3 text-[11px] text-muted-foreground sm:h-4">
+        {showRole ? <span className="inline-flex items-center gap-0.5"><RoleIcon role={p.role} className="h-3 w-3" /><span className="hidden sm:inline">{ROLE_LABEL[p.role]}</span></span> : <span className="hidden sm:inline">{p.alive ? "생존" : "사망"}</span>}
+        {votedByMe && <span className="hidden sm:inline"> (투표)</span>}
       </div>
     </button>
   );

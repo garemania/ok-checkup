@@ -63,10 +63,10 @@ const Mafia = () => {
   return (
     <div className={`min-h-screen transition-colors duration-700 ${night ? "bg-[hsl(230_35%_7%)]" : "bg-background"}`}>
       <InkDefs />
-      <div className="mx-auto flex h-screen max-w-3xl flex-col gap-3 p-3 sm:p-4">
+      <div className="mx-auto flex h-dvh max-w-3xl flex-col gap-2 p-2 sm:gap-3 sm:p-4">
         <TopBar state={state} onSettings={() => setSettingsOpen(true)} onInfo={() => setInfoOpen(true)} onLog={() => setLogOpen(true)} />
 
-        <section className="grid grid-cols-4 gap-1 rounded-2xl border border-border bg-card/60 p-2">
+        <section className="grid grid-cols-8 gap-0 rounded-xl border border-border bg-card/60 p-1 sm:grid-cols-4 sm:gap-1 sm:rounded-2xl sm:p-2">
           {state.players.map((p) => {
             const known = p.isHuman || state.phase === "gameover" || p.revealed || (me.role === "mafia" && p.role === "mafia");
             const inv = myPolice.find((r) => r.target === p.id);
