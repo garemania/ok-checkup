@@ -21,7 +21,7 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
   if (last) {
     if (last.from === "system") {
       body = (
-        <div key={last.id} className="flex h-full items-center justify-center p-3 animate-in fade-in duration-200">
+        <div key={last.id} className="flex h-full items-center justify-center p-2 animate-in sm:p-3 fade-in duration-200">
           <div className="max-h-full w-full overflow-y-auto rounded-xl border-2 border-black bg-[#e9e1d2] px-4 py-3 text-center text-sm font-semibold leading-relaxed text-black shadow-[3px_3px_0_0_#000] whitespace-pre-line sm:text-base">
             {last.text}
           </div>
@@ -32,8 +32,8 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
       const emotion = last.emotion ?? "neutral";
       const loud = emotion === "angry" || emotion === "surprised" || emotion === "scared";
       body = (
-        <div key={last.id} className="flex h-full items-stretch gap-3 p-3 animate-in fade-in slide-in-from-left-4 duration-200">
-          <div className={cn("relative h-28 w-28 shrink-0 self-start sm:h-32 sm:w-32", loud && "animate-[shake_0.35s_ease-in-out]")}>
+        <div key={last.id} className="flex h-full items-stretch gap-2 p-2 animate-in sm:gap-3 sm:p-3 fade-in slide-in-from-left-4 duration-200">
+          <div className={cn("relative h-24 w-24 shrink-0 self-start sm:h-32 sm:w-32", loud && "animate-[shake_0.35s_ease-in-out]")}>
             <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg shadow-lg" rough />
             <span className="absolute -bottom-1 left-1 rounded bg-black px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
               {p.name} · {EMOTION_LABEL[emotion]}
@@ -63,7 +63,7 @@ export function SpeakerStage({ state, speaking, waiting, onNext }: Props) {
       aria-label={waiting ? "다음 대사" : undefined}
     >
       <div className="min-h-0 flex-1">{body}</div>
-      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-t border-border/60 px-3">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-t border-border/60 px-2 sm:h-12 sm:px-3">
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           {thinking ? (
             <>
