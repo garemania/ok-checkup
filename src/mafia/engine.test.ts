@@ -689,3 +689,12 @@ describe("first-night rules and pressing", () => {
     }
   }, 30000);
 });
+
+describe("build info", () => {
+  it("formats the update time in Korean time", async () => {
+    const { formatKST, BUILD_LABEL } = await import("./buildInfo");
+    expect(formatKST("2026-11-13T02:20:00Z")).toBe("2026.11.13 11:20");
+    expect(formatKST("")).toBe("-");
+    expect(BUILD_LABEL).toContain("업데이트");
+  });
+});

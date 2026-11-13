@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BUILD_LABEL } from "../buildInfo";
 import type { Settings } from "../types";
 
 export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = [], onClearErrors }: { open: boolean; onOpenChange: (o: boolean) => void; settings: Settings; onSave: (s: Settings) => void; errors?: string[]; onClearErrors?: () => void }) {
@@ -80,6 +81,7 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = 
             <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-secondary/60 p-2 text-[11px] leading-snug">{errors.join("\n\n")}</pre>
           </div>
         )}
+        <p className="text-center text-[11px] text-muted-foreground">{BUILD_LABEL}</p>
         <DialogFooter>
           <Button onClick={() => { onSave(s); onOpenChange(false); }}>저장</Button>
         </DialogFooter>

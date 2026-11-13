@@ -26,6 +26,8 @@ jobs:
       - run: npm run build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
+          # 배포할 때마다 1씩 올라가는 버전 번호 (v1.<실행 번호>)
+          VITE_APP_VERSION: 1.${{ github.run_number }}
       # 새로고침/직접 접속 시 SPA 라우팅이 되도록 404.html 복사
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
