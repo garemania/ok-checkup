@@ -71,14 +71,13 @@ export interface GameState {
   whispersUsed: number;
   investigations: Investigation[]; // 경찰(누구든) 조사 기록: actor 별로 분리
   policeLog: Record<number, Investigation[]>;
-  doctorLog: Record<number, { day: number; target: number; saved: boolean }[]>;
-  mafiaLog: { day: number; target: number; result: "killed" | "saved" | "shielded" }[]; // 마피아 습격 기록 (마피아만 아는 정보) // 의사별 보호 기록 (saved: 실제로 습격을 막음)
+  doctorLog: Record<number, { day: number; target: number; quiet: boolean }[]>; // 의사별 보호 기록 (quiet: 그 밤 아무도 죽지 않음. 의사가 막았는지 군인이 버텼는지는 의사도 모른다)
+  mafiaLog: { day: number; target: number; result: "killed" | "failed" }[]; // 마피아 습격 기록 (실패 이유는 마피아도 모른다) // 의사별 보호 기록 (saved: 실제로 습격을 막음)
   votes: Record<number, number | null>;
   accused: number | null; // 재판 대상
   trialStage: TrialStage | null;
   actionsUsed: number; // 오늘 사용한 낮 행동 횟수
   autoUsed: number; // 오늘 플레이어 대신 자동으로 한 말의 수
-  watchUsed: number; // 오늘 사용한 "지켜보기" 횟수
   lastNightResult: string;
   winner?: "mafia" | "citizen";
   nextMsgId: number;
@@ -94,6 +93,7 @@ export interface Settings {
   model: string;
   nickname: string;
   autoSpeak: boolean; // 대화 중 내 캐릭터도 하루 몇 번 자동으로 말하기
+  autoAdvance: boolean; // 대사를 자동으로 넘기기 (끄면 "다음"을 눌러야 넘어감)
 }
 
 export const ROLE_LABEL: Record<Role, string> = {

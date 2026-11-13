@@ -57,7 +57,7 @@ describe("mock AI", () => {
       for (const p of ais) {
         const t = await ai.vote(s, p);
         expect(t).not.toBe(p.id);
-        if (p.role === "mafia") expect(s.players[t as number].role).not.toBe("mafia");
+        if (p.role === "mafia" && t !== null) expect(s.players[t].role).not.toBe("mafia");
       }
     }
   }, 30000);
@@ -893,7 +893,7 @@ describe("doctor reports are not police reports", () => {
   it("explains the doctor's deduction when the morning confirms a save", async () => {
     const { factsBlock, deductions } = await import("./context");
     let s = { ...createGame("나"), day: 2 };
-    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 마피아의 습격이 있었지만, 의사가 누군가를 구해냈습니다. 아무도 죽지 않았습니다.", "day");
+    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 밤사이 아무도 죽지 않았습니다.", "day");
     s = addMsg(s, 0, "저는 의사예요. 어젯밤 서연 보호했어요.", "day");
     expect(factsBlock(s)).toContain("경찰 조사가 아님");
     expect(deductions(s).join(" ")).toContain("의사의 추론이지 경찰의 조사가 아니다");
@@ -905,8 +905,9 @@ describe("doctor reports are not police reports", () => {
     const doc = s.players.find((p) => p.role === "doctor")!;
     const target = s.players.find((p) => p.role === "citizen")!;
     const r = resolveNight(s, { kill: target.id, protect: target.id, protector: doc.id, investigate: null });
-    expect(r.state.doctorLog[doc.id]).toEqual([{ day: 2, target: target.id, saved: true }]);
-    expect(r.state.mafiaLog).toEqual([{ day: 2, target: target.id, result: "saved" }]);
+    expect(r.state.doctorLog[doc.id]).toEqual([{ day: 2, target: target.id, quiet: true }]);
+    expect(r.state.mafiaLog).toEqual([{ day: 2, target: target.id, result: "failed" }]);
+    expect(r.result).toBe("밤사이 아무도 죽지 않았습니다.");
   });
 
   it("offline AIs: the real doctor objects, the saved person thanks, nobody asks how the 'investigation' was done", async () => {
@@ -942,9 +943,9 @@ describe("role-based reasoning notes", () => {
     const doc = s.players.find((p) => p.role === "doctor")!;
     const mafia = s.players.find((p) => p.role === "mafia")!;
     const t = s.players.find((p) => p.role === "citizen")!;
-    s = { ...s, doctorLog: { [doc.id]: [{ day: 2, target: t.id, saved: true }] }, mafiaLog: [{ day: 2, target: t.id, result: "saved" }] };
-    expect(reasoningNotes(s, doc).join(" ")).toContain(`${t.name}은(는) 마피아의 표적이었으니 마피아가 아니다`);
-    expect(reasoningNotes(s, mafia).join(" ")).toContain("의사가 막음");
+    s = { ...s, doctorLog: { [doc.id]: [{ day: 2, target: t.id, quiet: true }] }, mafiaLog: [{ day: 2, target: t.id, result: "failed" }] };
+    expect(reasoningNotes(s, doc).join(" ")).toContain("군인이 버텼을 수도 있어 확실하지 않다");
+    expect(reasoningNotes(s, mafia).join(" ")).toContain("어느 쪽인지는 모른다");
   });
 
   it("the notes reach the model in the system prompt", async () => {
@@ -1041,5 +1042,65 @@ describe("obvious remarks, repeated interrogation, mentions vs addressing", () =
     expect(repeatsQuestion(s, 2, "하은님, 어제 왜 서연한테 투표하셨어요?")).toBe(true);
     expect(repeatsQuestion(s, 2, "하은님 대답은 들었으니, 민재님 생각은 어때요?")).toBe(false);
     expect(repeatsQuestion(s, 2, "민재님은 어제 누구 찍었어요?")).toBe(false);
+  });
+});
+
+describe("abstain when unsure", () => {
+  it("offline citizens abstain on a day with no evidence at all", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    for (let i = 0; i < 3; i++) {
+      const s = createGame("나");
+      for (const p of s.players.filter((x) => !x.isHuman && x.role !== "mafia")) expect(await ai.vote(s, p)).toBeNull();
+    }
+  }, 30000);
+
+  it("but they do vote when there is a real reason", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    let s = createGame("나");
+    const target = s.players.find((p) => !p.isHuman && p.role === "mafia")!;
+    s = addMsg(s, 0, `저는 경찰입니다. 조사해 보니 ${target.name}님은 마피아입니다.`);
+    s = addMsg(s, 2, `${target.name} 정말 수상해요. 마피아 같아요.`);
+    const citizens = s.players.filter((p) => !p.isHuman && p.role !== "mafia" && p.id !== 2);
+    let votedTarget = 0;
+    for (const p of citizens) if ((await ai.vote(s, p)) === target.id) votedTarget++;
+    expect(votedTarget).toBeGreaterThan(0);
+  }, 30000);
+
+  it("a low-confidence model vote becomes an abstention", async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"vote": 3, "confidence": 40, "reason": "그냥 느낌"}' }] } }] }), { status: 200 })) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const s = createGame("나");
+      expect(await ai.vote(s, s.players.find((p) => !p.isHuman && p.role !== "mafia")!)).toBeNull();
+    } finally { globalThis.fetch = orig; }
+  });
+});
+
+describe("morning announcement hides why nobody died", () => {
+  it("doctor save and soldier shield produce the same message", async () => {
+    const { resolveNight } = await import("./engine");
+    const s = { ...createGame("나"), day: 2 };
+    const doc = s.players.find((p) => p.role === "doctor")!;
+    const soldier = s.players.find((p) => p.role === "soldier")!;
+    const citizen = s.players.find((p) => p.role === "citizen")!;
+    const saved = resolveNight(s, { kill: citizen.id, protect: citizen.id, protector: doc.id, investigate: null });
+    const shielded = resolveNight(s, { kill: soldier.id, protect: citizen.id, protector: doc.id, investigate: null });
+    expect(saved.result).toBe("밤사이 아무도 죽지 않았습니다.");
+    expect(shielded.result).toBe("밤사이 아무도 죽지 않았습니다.");
+    expect(shielded.state.players[soldier.id].shield).toBe(false);
+    // 의사는 둘 다 "그 밤 아무도 죽지 않음"까지만 안다
+    expect(saved.state.doctorLog[doc.id]).toEqual([{ day: 2, target: citizen.id, quiet: true }]);
+    expect(shielded.state.doctorLog[doc.id]).toEqual([{ day: 2, target: citizen.id, quiet: true }]);
+    // 마피아도 실패 이유는 모른다
+    expect(saved.state.mafiaLog[0].result).toBe("failed");
+    expect(shielded.state.mafiaLog[0].result).toBe("failed");
+  });
+
+  it("everyone is told that the reason is unknown", async () => {
+    const { deductions } = await import("./context");
+    let s = { ...createGame("나"), day: 2 };
+    s = addMsg(s, "system", "2일차 낮이 밝았습니다. 밤사이 아무도 죽지 않았습니다.", "day");
+    expect(deductions(s).join(" ")).toContain("어느 쪽인지는 아무도 모른다");
   });
 });
