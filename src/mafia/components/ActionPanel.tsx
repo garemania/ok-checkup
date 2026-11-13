@@ -14,6 +14,7 @@ import { RoleIcon } from "./RoleIcon";
 interface Props {
   state: GameState;
   busy: boolean;
+  waiting: boolean; // AI 대화 중 "다음" 대기 (이때는 끼어들어 말할 수 있다)
   awaitingHuman: boolean;
   target: number | null;
   setTarget: (id: number | null) => void;
@@ -44,7 +45,7 @@ const ACTIONS = [
 type ActionKind = (typeof ACTIONS)[number]["kind"];
 const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
-export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
+export function ActionPanel({ state, busy, waiting, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
   const [defense, setDefense] = useState("");
   const [mode, setMode] = useState<ActionKind | null>(null);
@@ -249,12 +250,18 @@ export function ActionPanel({ state, busy, awaitingHuman, target, setTarget, onN
         )}
       </div>
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onSend(text); setText(""); } }}>
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={me.alive ? "모두에게 발언하기..." : "사망하여 발언할 수 없습니다"} disabled={!me.alive || busy} maxLength={200} />
-        <Button type="submit" size="icon" disabled={!me.alive || busy || !text.trim()} aria-label="보내기"><Send className="h-4 w-4" /></Button>
+        <Input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={!me.alive ? "사망하여 발언할 수 없습니다" : busy && waiting ? "끼어들어 말하기..." : "모두에게 발언하기..."}
+          disabled={!me.alive || (busy && !waiting)}
+          maxLength={200}
+        />
+        <Button type="submit" size="icon" disabled={!me.alive || (busy && !waiting) || !text.trim()} aria-label="보내기"><Send className="h-4 w-4" /></Button>
       </form>
       <div className="flex gap-2">
         <Button variant="secondary" className="flex-1" disabled={busy || roundsLeft <= 0} onClick={onRound}>
-          {state.round === 0 ? "토론 시작" : "다음 발언 라운드"} ({roundsLeft}회 남음)
+          대화 진행 ({roundsLeft}회 남음)
         </Button>
         <Button className="flex-1" disabled={busy} onClick={onStartVote}>투표로 넘어가기</Button>
       </div>

@@ -97,6 +97,7 @@ const Mafia = () => {
           <ActionPanel
             state={state}
             busy={g.busy}
+            waiting={g.waiting}
             awaitingHuman={g.awaitingHuman}
             target={target}
             setTarget={setTarget}

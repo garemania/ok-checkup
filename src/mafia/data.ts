@@ -53,3 +53,8 @@ export const AI_CHARS: Character[] = [
     speech: "짧고 단정적인 평어체 반말. '~다', '~해', '~잖아'로 끝낸다. 존댓말, 과장된 영웅·군인 말투, 설교조 금지. 말 예시: '난 지후가 수상하다고 본다.' '근거 없이 넘어가지 마.' '내 표는 서연이다. 반박할 사람?'",
     look: { hair: "wild", hairColor: "#2b2b2f", ears: "wolf", accessory: "scar", browWidth: 3 } }
 ];
+
+/** 성격별 말 많은 정도 (대화 진행자가 다음 화자를 고를 때 가중치) */
+export const TALKATIVENESS: Record<string, number> = {
+  태오: 1.6, 도윤: 1.4, 지후: 1.3, 유나: 1.2, 서연: 1.0, 하은: 0.7, 민재: 0.6,
+};
