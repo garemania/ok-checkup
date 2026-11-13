@@ -71,10 +71,13 @@ export function checkWin(s: GameState): "mafia" | "citizen" | undefined {
   return undefined;
 }
 
+/** 사망 처리. reveal=true면 처형(직업 공개), false면 밤의 살해(직업 비공개) */
 export function kill(s: GameState, id: number, reveal: boolean): GameState {
   return {
     ...s,
-    players: s.players.map((p) => (p.id === id ? { ...p, alive: false, revealed: reveal || p.revealed } : p)),
+    players: s.players.map((p) =>
+      p.id === id ? { ...p, alive: false, revealed: reveal || p.revealed, death: { day: s.day, cause: reveal ? "executed" : "killed" } } : p,
+    ),
   };
 }
 

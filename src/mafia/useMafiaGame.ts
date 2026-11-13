@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI } from "./ai";
 import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
-import { normalizeHuman } from "./context";
+import { detectClaims, interpretByRules, normalizeHuman } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
-import type { Emotion, GameState, Player, Role, Settings } from "./types";
+import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
 export const DEFAULT_SETTINGS: Settings = {
@@ -209,25 +209,62 @@ export function useMafiaGame(onError: (msg: string) => void) {
     return true;
   };
 
+  /** 조사 보고에 대한 반응 목록: 조사 대상이 먼저, 다른 두 명이 이어서 */
+  const reportItems = (s0: GameState, target: number, result: "clean" | "mafia") => {
+    const me0 = s0.players[HUMAN_ID].name;
+    const t = s0.players[target];
+    const verdict = result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)";
+    const tag = `[조사보고:${t.id}:${result}]`;
+    const items: { player: Player; hint: string }[] = [];
+    if (t.alive && !t.isHuman)
+      items.push({ player: t, hint: `${tag} ${me0}가 자신이 경찰이라며 당신을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신이 조사 대상입니다. [비공개 정보]의 당신의 실제 직업과 이 보고가 맞는지 규칙에 따라 판단해 반응하세요. 대상과 결과는 이미 나왔으니 다시 묻지 마세요.` });
+    aliveAI(s0).filter((p) => p.id !== t.id).sort(() => Math.random() - 0.5).slice(0, 2).forEach((p) =>
+      items.push({ player: p, hint: `${tag} ${me0}가 자신이 경찰이라며 ${t.name}님을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신은 조사 대상이 아닙니다. 보고의 신빙성을 규칙과 당신의 직업 정보에 비추어 판단해 반응하세요. 당신이 진짜 경찰이면 즉시 반박하세요. 대상과 결과는 이미 나왔으니 다시 묻지 마세요.` }),
+    );
+    return items;
+  };
+
+  const claimItems = (s0: GameState, role: Role) => {
+    const me0 = s0.players[HUMAN_ID].name;
+    const label = ROLE_LABEL[role];
+    return aliveAI(s0).sort(() => Math.random() - 0.5).slice(0, 2).map((p) => ({ player: p, hint: `[주장:${label}] ${me0}가 자신이 ${label}${hasBatchim(label) ? "이" : ""}라고 공개적으로 주장했습니다. 게임 규칙(직업 주장은 증명이 아님, 진짜 경찰은 1명)과 당신의 실제 직업에 비추어 믿을지 의심할지 근거와 함께 반응하세요.` }));
+  };
+
+  const setMeaning = (msgId: number, meaning: Meaning) =>
+    commit((x) => ({ ...x, log: x.log.map((m) => (m.id === msgId ? { ...m, meaning } : m)) }));
+
   const sendPublic = async (text: string) => {
     const s0 = ref.current;
     if (!s0 || busy || !text.trim() || !s0.players[HUMAN_ID].alive || s0.phase !== "day") return;
     const id = runId.current;
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
+    const msgId = ref.current!.nextMsgId - 1;
     setBusy(true);
+    // 자유 발언을 직업 주장/조사 보고로 해석해 둔다 (API: LLM 해석, 실패 또는 오프라인: 규칙 기반)
+    const llmMeaning = await ai().interpret(ref.current!, text.trim());
+    if (!alivePhaseGuard(id)) return;
+    const wasPolice = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) })[HUMAN_ID] === "police";
+    const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice);
+    if (llmMeaning) setMeaning(msgId, llmMeaning);
     const cur = ref.current!;
     const me0 = cur.players[HUMAN_ID].name;
     const normalized = normalizeHuman(text, cur.players).text;
-    const mentioned = aliveAI(cur).filter((p) => normalized.includes(p.name));
-    const others = aliveAI(cur).filter((p) => !mentioned.includes(p)).sort(() => Math.random() - 0.5);
-    const responders = [...mentioned, ...others].slice(0, Math.max(2, mentioned.length));
-    const ok = await respond(
-      id,
-      responders.map((p) => ({
+    let items: { player: Player; hint: string }[];
+    if (meaning.reports?.length) {
+      const r = meaning.reports[0];
+      items = reportItems(cur, r.target, r.result);
+    } else if (meaning.claim) {
+      items = claimItems(cur, meaning.claim);
+    } else {
+      const mentioned = aliveAI(cur).filter((p) => normalized.includes(p.name));
+      const others = aliveAI(cur).filter((p) => !mentioned.includes(p)).sort(() => Math.random() - 0.5);
+      const responders = [...mentioned, ...others].slice(0, Math.max(2, mentioned.length));
+      items = responders.map((p) => ({
         player: p,
-        hint: `플레이어(${me0})가 방금 발언했습니다. ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
-      })),
-    );
+        hint: `플레이어(${me0})가 방금 발언했습니다.${meaning.summary ? ` (발언 해석: ${meaning.summary})` : ""} ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
+      }));
+    }
+    const ok = await respond(id, items);
     if (!ok) return;
     setSpeaking(null);
     setBusy(false);
@@ -247,17 +284,12 @@ export function useMafiaGame(onError: (msg: string) => void) {
       const label = ROLE_LABEL[a.role];
       text = `저는 ${label}입니다.`;
       emotion = "neutral";
-      items = shuffled([]).slice(0, 2).map((p) => ({ player: p, hint: `[주장:${label}] ${me0}가 자신이 ${label}${hasBatchim(label) ? "이" : ""}라고 공개적으로 주장했습니다. 게임 규칙(직업 주장은 증명이 아님, 진짜 경찰은 1명)과 당신의 실제 직업에 비추어 믿을지 의심할지 근거와 함께 반응하세요.` }));
+      items = claimItems(s0, a.role);
     } else if (a.kind === "report") {
       const t = s0.players[a.target];
-      const verdict = a.result === "mafia" ? "마피아" : "마피아 아님(시민 쪽)";
       text = `저는 경찰입니다. 조사해 보니 ${t.name}님은 ${a.result === "mafia" ? "마피아입니다" : "마피아가 아닙니다"}.`;
       emotion = a.result === "mafia" ? "suspicious" : "neutral";
-      const tag = `[조사보고:${t.id}:${a.result}]`;
-      items = [{ player: t, hint: `${tag} ${me0}가 자신이 경찰이라며 당신을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신이 조사 대상입니다. [비공개 정보]의 당신의 실제 직업과 이 보고가 맞는지 규칙에 따라 판단해 반응하세요.` }];
-      shuffled([t.id]).slice(0, 2).forEach((p) =>
-        items.push({ player: p, hint: `${tag} ${me0}가 자신이 경찰이라며 ${t.name}님을 조사한 결과 "${verdict}"라고 공개 보고했습니다. 당신은 조사 대상이 아닙니다. 보고의 신빙성을 규칙과 당신의 직업 정보에 비추어 판단해 반응하세요. 당신이 진짜 경찰이면 즉시 반박하세요.` }),
-      );
+      items = reportItems(s0, a.target, a.result);
     } else {
       const t = s0.players[a.target];
       const rest = shuffled([t.id]);
@@ -277,6 +309,14 @@ export function useMafiaGame(onError: (msg: string) => void) {
       }
     }
     commit((x) => ({ ...addMsg(x, HUMAN_ID, text, undefined, emotion), actionsUsed: x.actionsUsed + 1 }));
+    const msgId = ref.current!.nextMsgId - 1;
+    if (a.kind === "claim") setMeaning(msgId, { claim: a.role, summary: `${ROLE_LABEL[a.role]} 주장` });
+    if (a.kind === "report")
+      setMeaning(msgId, {
+        claim: "police",
+        reports: [{ target: a.target, result: a.result }],
+        summary: `경찰 주장, ${s0.players[a.target].name}을(를) 조사해 "${a.result === "mafia" ? "마피아" : "마피아 아님"}"으로 보고`,
+      });
     setBusy(true);
     const ok = await respond(id, items);
     if (!ok) return;
