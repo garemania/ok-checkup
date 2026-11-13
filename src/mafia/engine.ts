@@ -35,8 +35,6 @@ export function createGame(nickname: string): GameState {
     round: 0,
     players,
     log: [],
-    whispers: {},
-    whispersUsed: 0,
     investigations: [],
     policeLog: {},
     doctorLog: {},

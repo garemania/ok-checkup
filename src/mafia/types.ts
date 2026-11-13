@@ -48,14 +48,6 @@ export interface Meaning {
   summary?: string;
 }
 
-export interface WhisperMsg {
-  id: number;
-  day: number;
-  from: number; // 발신자 id
-  text: string;
-  emotion?: Emotion;
-}
-
 export interface Investigation {
   target: number;
   isMafia: boolean;
@@ -68,8 +60,6 @@ export interface GameState {
   round: number; // 오늘 진행된 토론 라운드
   players: Player[];
   log: ChatMsg[];
-  whispers: Record<number, WhisperMsg[]>; // key: AI id (나와의 1:1)
-  whispersUsed: number;
   investigations: Investigation[]; // 경찰(누구든) 조사 기록: actor 별로 분리
   policeLog: Record<number, Investigation[]>;
   doctorLog: Record<number, { day: number; target: number; quiet: boolean }[]>; // 의사별 보호 기록 (quiet: 그 밤 아무도 죽지 않음. 의사가 막았는지 군인이 버텼는지는 의사도 모른다)

@@ -13,14 +13,13 @@ interface Props {
   mark?: "mafia" | "clean" | null; // 경찰 조사 결과
   voteCount?: number;
   votedByMe?: boolean;
-  unread?: boolean;
   selected?: boolean;
   guess?: Role | null; // 내 직업 추정 메모
   onGuess?: () => void;
   onClick: () => void;
 }
 
-export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteCount, votedByMe, unread, selected, guess, onGuess, onClick }: Props) {
+export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteCount, votedByMe, selected, guess, onGuess, onClick }: Props) {
   return (
     <div
       role="button"
@@ -43,7 +42,6 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
         )}
       >
         <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg" rough />
-        {unread && <span className="absolute -right-0.5 top-0 h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 rounded-full border-2 border-background bg-destructive" />}
         {mark && (
           <span className={cn("absolute -bottom-1 -left-1 rounded-full px-0.5 text-[8px] font-bold sm:px-1 sm:text-[10px]", mark === "mafia" ? "bg-destructive text-destructive-foreground" : "bg-success text-background")}>
             {mark === "mafia" ? "마피아" : "시민"}

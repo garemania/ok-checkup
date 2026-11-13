@@ -10,7 +10,6 @@ import { StartScreen } from "@/mafia/components/StartScreen";
 import { PhaseBanner } from "@/mafia/components/PhaseBanner";
 import { LogSheet } from "@/mafia/components/LogSheet";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
-import { WhisperSheet } from "@/mafia/components/WhisperSheet";
 import { SettingsDialog } from "@/mafia/components/SettingsDialog";
 import { InfoDialog } from "@/mafia/components/InfoDialog";
 import { useMafiaGame } from "@/mafia/useMafiaGame";
@@ -22,7 +21,7 @@ import { RoleIcon } from "@/mafia/components/RoleIcon";
 const Mafia = () => {
   const g = useMafiaGame((m) => toast.error(m, { duration: 15000 }));
   const { state } = g;
-  const [whisperId, setWhisperId] = useState<number | null>(null);
+  const [talkTo, setTalkTo] = useState<number | null>(null); // 얼굴을 눌러 지칭해서 말할 대상
   const [target, setTarget] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -31,7 +30,7 @@ const Mafia = () => {
   // 게임 시작 직후 직업 안내
   const day = state?.day;
   const phase = state?.phase;
-  useEffect(() => { setTarget(null); }, [day, phase]);
+  useEffect(() => { setTarget(null); setTalkTo(null); }, [day, phase]);
 
   // 나만 아는 밤 결과를 아침에 개인 알림으로 (다른 사람에게는 보이지 않음)
   const lastNotified = useRef<string>("");
@@ -67,14 +66,22 @@ const Mafia = () => {
   const myPolice = state.policeLog[HUMAN_ID] ?? [];
   const counts = state.phase === "vote" || state.phase === "day" ? tallyVotes(state, state.votes).counts : {};
   const night = state.phase === "night";
-  // 밤에는 대상 지목 용도, 투표에서도 지목 용도로 시트에서 선택 가능
-  const canPick = (state.phase === "night" && me.alive && me.role !== "citizen") || (state.phase === "vote" && me.alive && !g.busy);
-  const pickLabel = state.phase === "vote" ? "이 사람에게 투표 선택" : "이 사람을 대상으로 선택";
+  // 밤에는 능력 대상, 투표 때는 투표 대상으로 얼굴을 눌러 고른다
+  const nightPick = state.phase === "night" && me.alive && (me.role === "police" || (state.day > 1 && (me.role === "mafia" || me.role === "doctor")));
+  const canPick = nightPick || (state.phase === "vote" && me.alive && !g.busy);
+  const talkTarget = talkTo !== null && state.players[talkTo].alive ? talkTo : null;
 
-  const openWhisper = (id: number) => {
+  // 얼굴을 누르면: 낮에는 그 사람을 지칭해서 말하기, 밤·투표에는 대상 고르기
+  const onFace = (id: number) => {
     if (id === HUMAN_ID) { setInfoOpen(true); return; }
-    setWhisperId(id);
-    g.clearUnread(id);
+    const p = state.players[id];
+    if (!p.alive) { toast(`${p.name}님은 사망했습니다.`); return; }
+    if (canPick) {
+      if (state.phase === "night" && me.role === "mafia" && p.role === "mafia") return;
+      setTarget(target === id ? null : id);
+      return;
+    }
+    if (state.phase === "day" && me.alive) setTalkTo(talkTarget === id ? null : id);
   };
 
   return (
@@ -97,11 +104,10 @@ const Mafia = () => {
                 showRole={known}
                 mark={inv ? (inv.isMafia ? "mafia" : "clean") : null}
                 voteCount={state.phase === "vote" && Object.keys(state.votes).length ? counts[p.id] : undefined}
-                unread={g.unread[p.id]}
-                selected={target === p.id}
+                selected={target === p.id || talkTarget === p.id}
                 guess={g.guesses[p.id] ?? null}
                 onGuess={p.isHuman ? undefined : () => g.cycleGuess(p.id)}
-                onClick={() => openWhisper(p.id)}
+                onClick={() => onFace(p.id)}
               />
             );
           })}
@@ -123,6 +129,8 @@ const Mafia = () => {
             awaitingHuman={g.awaitingHuman}
             guesses={g.guesses}
             target={target}
+            talkTo={talkTarget}
+            setTalkTo={setTalkTo}
             setTarget={setTarget}
             onNight={g.runNight}
             onRound={g.runRound}
@@ -137,16 +145,6 @@ const Mafia = () => {
         </footer>
       </div>
 
-      <WhisperSheet
-        state={state}
-        targetId={whisperId}
-        typing={g.typing}
-        blockReason={whisperId !== null ? g.whisperBlockReason(whisperId) : null}
-        onClose={() => setWhisperId(null)}
-        onSend={g.sendWhisper}
-        onPick={canPick ? setTarget : undefined}
-        pickLabel={pickLabel}
-      />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />
       <PhaseBanner phase={state.phase} day={state.day} />
       <LogSheet state={state} open={logOpen} onOpenChange={setLogOpen} />

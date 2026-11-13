@@ -93,7 +93,7 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
           ) : state.phase === "night" ? (
             <><Moon className="h-4 w-4" />밤입니다</>
           ) : (
-            <span className="truncate">대화 기록은 위쪽 📜 버튼</span>
+            <span className="truncate">대화 기록은 위쪽 두루마리 버튼</span>
           )}
         </span>
         {onToggleAuto && (state.phase === "day" || state.phase === "vote" || state.phase === "trial") && (

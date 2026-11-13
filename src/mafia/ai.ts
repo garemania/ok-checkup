@@ -223,15 +223,13 @@ ${privateKnowledge(s, p)}
 
 function stateBlock(s: GameState, p: Player): string {
   const living = alive(s).map((x) => `${x.id}:${x.name}`).join(", ");
-  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})` : `${p.name}(당신)`}: ${m.text}`).join("\n");
   return `[현재] ${s.day}일차 (${s.phase === "night" ? "밤" : s.phase === "vote" ? "투표" : s.phase === "trial" ? "재판" : "낮"})
 생존자(id:이름, 투표·지목은 이 중에서만): ${living}
 [지금까지 일어난 일]
 ${factsBlock(s)}
 [지금까지 오간 대화] (최근 순서대로, "(당신)"이 붙은 줄이 당신의 발언)
 ${transcriptFor(s, p) || "(아직 없음)"}
-${focusBlock(s, p)}
-${w ? `[플레이어(${s.players[HUMAN_ID].name})와 나눈 1:1 비밀 대화]\n${w}` : ""}`;
+${focusBlock(s, p)}`;
 }
 
 const clean = (t: string, name: string) =>
@@ -293,7 +291,6 @@ export interface AI {
   speak(s: GameState, p: Player, hint?: string): Promise<Spoken>;
   vote(s: GameState, p: Player): Promise<number | null>;
   nightTarget(s: GameState, p: Player, kind: "kill" | "protect" | "investigate"): Promise<number>;
-  whisper(s: GameState, p: Player, userText: string): Promise<Spoken>;
   /** 사람 플레이어의 자유 발언을 직업 주장/조사 보고로 해석 (실패하면 null) */
   interpret(s: GameState, text: string): Promise<Meaning | null>;
   /** 최후 찬반 투표: true = 처형에 찬성 */
@@ -407,14 +404,6 @@ ${EMOTION_RULE}`;
         if (!m) throw new Error(`verdict parse: ${t.slice(0, 120) || "(빈 응답)"}`);
         return m[1].toLowerCase() === "true";
       }, () => mock.verdict(s, p, accused)),
-    whisper: (s, p, userText) =>
-      safe(async () => {
-        const night = s.phase === "night";
-        const task = `${s.players[HUMAN_ID].name}가 당신에게 1:1 비밀 대화로 말했습니다: "${userText}"
-${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.
-${EMOTION_RULE}`;
-        return askSpoken(settings, s, p, task);
-      }, () => mock.whisper(s, p, userText)),
   };
 }
 
@@ -703,19 +692,6 @@ function makeMockAI(): AI {
       // 확신이 없으면 처형에 반대한다 (근거가 있는 경우에만 찬성)
       return (top(sc) === accused && (sc[accused] ?? 0) >= 2.4) || (sc[accused] ?? 0) > 2.8 || Math.random() < 0.15;
     },
-    async whisper(s, p, userText) {
-      await wait(500 + Math.random() * 500);
-      const sc = suspicion(s, p);
-      const tn = top(sc);
-      const name = tn !== null ? nameOf(s, tn) : "누군가";
-      if (s.phase === "night" && p.role === "mafia") return `오늘 밤은 ${name}를 노리는 게 어때? 눈에 띄게 의심받고 있잖아.`;
-      if (/(마피아|경찰|의사|직업|정체)/.test(userText)) {
-        return p.role === "mafia" && Math.random() < 0.6
-          ? "나? 당연히 시민이지. 믿어줘. 오히려 내가 보기엔 " + name + " 쪽이 수상해."
-          : pick(["그건 아직 밝히기 곤란해. 일단 네 생각부터 말해줘.", "직업은 지금 말하긴 좀 위험하잖아. 토론에서 보자.", "나는 시민 쪽이라고 믿어줘. " + name + "을(를) 같이 지켜보자."]);
-      }
-      return pick([`음, 나는 ${name}이(가) 좀 신경 쓰여. 너는 어때?`, "좋은 생각이야. 토론에서 같이 밀어보자.", "일단 투표 전까지 더 지켜보자. 너무 서두르면 위험해."]);
-    },
   };
   // 오프라인 AI도 대사 내용에 맞춰 표정을 붙인다
   return {
@@ -729,10 +705,6 @@ function makeMockAI(): AI {
     nightTarget: raw.nightTarget,
     verdict: raw.verdict,
     interpret: async () => null, // 오프라인에서는 규칙 기반 해석만 사용
-    whisper: async (s, p, t) => {
-      const text = await raw.whisper(s, p, t);
-      return { text, emotion: detectEmotion(text) };
-    },
   };
 }
 
