@@ -613,3 +613,42 @@ describe("deaths, deductions and trust", () => {
     for (const v of voters) expect(await ai.vote(s, v)).not.toBe(target.id);
   }, 30000);
 });
+
+describe("last words after execution", () => {
+  it("knows when a line denies the revealed role", async () => {
+    const { deniesRevealedRole } = await import("./context");
+    expect(deniesRevealedRole("마피아도 아닌데 죽다니 억울해요", "mafia")).toBe(true);
+    expect(deniesRevealedRole("저는 시민이에요, 믿어 주세요", "mafia")).toBe(true);
+    expect(deniesRevealedRole("결국 들켰네요. 하지만 끝난 건 아니에요.", "mafia")).toBe(false);
+    expect(deniesRevealedRole("억울합니다. 꼭 마피아를 찾아 주세요.", "citizen")).toBe(false);
+    expect(deniesRevealedRole("사실 제가 마피아였어요", "citizen")).toBe(true);
+  });
+
+  it("offline mafia last words never claim innocence", async () => {
+    const { deniesRevealedRole } = await import("./context");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    const mafia = s.players.find((p) => p.role === "mafia" && !p.isHuman)!;
+    for (let i = 0; i < 6; i++) {
+      const w = await ai.speak(s, mafia, "[재판] 당신은 처형되었고, 직업이 \"마피아\"로 모두에게 공개되었습니다. 유언(마지막 한마디)을 하세요.");
+      expect(deniesRevealedRole(w.text, "mafia")).toBe(false);
+    }
+  }, 30000);
+
+  it("retries, then falls back, when the model keeps denying the revealed role", async () => {
+    const { speakLastWords } = await import("./ai");
+    const s = createGame("나");
+    const mafia = s.players.find((p) => p.role === "mafia" && !p.isHuman)!;
+    const hints: string[] = [];
+    const stubborn = { speak: async (_s: unknown, _p: unknown, h?: string) => { hints.push(h ?? ""); return { text: "마피아도 아닌데 억울해요", emotion: "sad" as const }; } } as unknown as ReturnType<typeof makeAI>;
+    const fallback = { speak: async () => ({ text: "결국 들켰네요.", emotion: "neutral" as const }) } as unknown as ReturnType<typeof makeAI>;
+    const w = await speakLastWords(stubborn, fallback, s, mafia);
+    expect(hints).toHaveLength(2);
+    expect(hints[0]).toContain('직업이 "마피아"로 모두에게 공개');
+    expect(hints[1]).toContain("직업을 부정하지 마세요");
+    expect(w.text).toBe("결국 들켰네요.");
+
+    const good = { speak: async () => ({ text: "잘 찾아내셨네요.", emotion: "smug" as const }) } as unknown as ReturnType<typeof makeAI>;
+    expect((await speakLastWords(good, fallback, s, mafia)).text).toBe("잘 찾아내셨네요.");
+  });
+});

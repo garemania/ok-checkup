@@ -1,5 +1,5 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
-import { addressesDead, detectClaims, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -132,7 +132,7 @@ const RULEBOOK = `[게임 규칙 전체]
 4. 죽음:
  - 죽은 사람은 더 이상 말하지도, 대답하지도, 투표하지도, 능력을 쓰지도 못한다. 죽은 사람에게 질문하거나 대답·해명을 요구하지 않는다. 대화는 살아 있는 사람끼리만 한다.
  - 죽은 사람이 살아 있을 때 한 말과 투표는 그대로 증거로 쓸 수 있다("서연이 생전에 ~라고 했다"처럼 과거형으로 말한다).
- - 처형된 사람은 직업이 공개되고, 밤에 살해된 사람은 직업이 공개되지 않는다. 사망자 수와 경위는 [핵심 사실]의 "사망자"를 기준으로 말하고, 틀리게 말하지 않는다(예: 누가 죽었는데 "아무도 안 죽었다"고 하지 않는다).
+ - 처형된 사람은 직업이 공개되고, 밤에 살해된 사람은 직업이 공개되지 않는다. 처형되어 직업이 공개된 사람은(유언을 포함해) 그 직업을 부정하지 않는다. 마피아로 공개되었다면 더 이상 결백을 주장하지 않는다. 사망자 수와 경위는 [핵심 사실]의 "사망자"를 기준으로 말하고, 틀리게 말하지 않는다(예: 누가 죽었는데 "아무도 안 죽었다"고 하지 않는다).
 5. 직업 주장과 조사 보고를 해석하는 법:
  - "저는 경찰이고 A를 조사했더니 시민(마피아 아님)이었다"는 "A는 마피아가 아니다"라는 경찰의 조사 보고다. 진짜 경찰이면 사실이고, 가짜 경찰(마피아나 거짓말하는 시민)이면 거짓일 수 있다. 직업 주장은 증명이 아니다.
  - 경찰을 주장하는 사람이 2명 이상이면 적어도 한 명은 가짜다.
@@ -446,6 +446,12 @@ function makeMockAI(): AI {
             ? ["난 마피아가 아니야. 내 표를 이렇게 날리면 진짜 마피아만 좋아져.", "억울하다. 한 번만 더 생각해 봐. 나를 처형하면 후회한다.", "근거도 없이 나를 몰아가네. 그래도 마지막으로 말한다. 난 시민이다."]
             : ["저는 마피아가 아닙니다. 지금 저를 처형하면 진짜 마피아만 웃게 됩니다.", "정말 억울합니다. 한 번만 다시 생각해 주세요.", "근거 없이 지목되었지만, 저는 시민이라는 것을 마지막으로 말씀드립니다."]);
         }
+        // 유언: 처형으로 직업이 공개된 뒤이므로 공개된 직업에 맞게 말한다
+        if (p.role === "mafia") {
+          return pick(informal
+            ? ["결국 들켰네. 그래도 아직 끝난 건 아니다.", "여기까지군. 남은 밤을 조심하는 게 좋을 거야.", "잘 찾아냈네. 하지만 내가 전부는 아니야."]
+            : ["결국 들켰네요. 그래도 아직 끝난 건 아니에요.", "여기까지네요. 남은 밤들을 조심하시는 게 좋을 거예요.", "잘 찾아내셨네요. 하지만 저 혼자가 아니라는 건 아시죠?"]);
+        }
         return pick(informal
           ? ["여기까지네. 남은 사람들, 진짜 마피아를 꼭 잡아 줘.", "내 몫은 여기까지다. 잘 부탁한다."]
           : ["여기까지인가 봅니다. 남은 분들이 꼭 마피아를 찾아내 주세요.", "제 몫은 여기까지네요. 부탁드립니다."]);
@@ -598,3 +604,20 @@ function makeMockAI(): AI {
   };
 }
 
+
+/**
+ * 처형된 캐릭터의 유언. 직업이 공개된 뒤이므로 공개된 직업에 맞게 말하게 하고,
+ * 직업을 부정하면(예: 마피아인데 "억울하다, 난 시민") 한 번 다시 묻고, 그래도 어긋나면 fallback(오프라인) 문장을 쓴다.
+ */
+export async function speakLastWords(engine: AI, fallback: AI, s: GameState, dead: Player): Promise<Spoken> {
+  const roleLabel = ROLE_LABEL[dead.role];
+  const guide = dead.role === "mafia"
+    ? "더 이상 정체를 숨길 수 없습니다. 결백이나 억울함을 주장하지 말고, 남은 동료가 누구인지는 드러내지 않은 채 짧게 인정하거나 도발하는 유언을 하세요."
+    : "억울함이나 남은 사람들에게 당부하는 말을 짧게 하세요.";
+  const hint = `[재판] 당신은 처형되었고, 직업이 "${roleLabel}"로 모두에게 공개되었습니다. ${guide} 유언(마지막 한마디)을 하세요.`;
+  let last = await engine.speak(s, dead, hint);
+  if (!deniesRevealedRole(last.text, dead.role)) return last;
+  last = await engine.speak(s, dead, `${hint} [주의] 방금 유언 "${last.text}"은(는) 공개된 직업(${roleLabel})과 맞지 않습니다. 직업을 부정하지 마세요.`);
+  if (!deniesRevealedRole(last.text, dead.role)) return last;
+  return fallback.speak(s, dead, hint);
+}

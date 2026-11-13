@@ -311,3 +311,9 @@ export function addressesDead(s: GameState, text: string, speaker: number): numb
   }
   return null;
 }
+
+/** 처형으로 공개된 직업을 부정하는 말인지 (예: 마피아로 공개됐는데 "억울하다, 난 시민이다") */
+export function deniesRevealedRole(text: string, role: Role): boolean {
+  if (role === "mafia") return /(억울|마피아가?\s*아니|마피아\s*아님|결백|무고|(?:저는|난|나는|전)\s*시민|시민(?:이에요|이야|이다|입니다)|오해)/.test(text);
+  return /((?:제가|내가|저는|난|나는)\s*마피아(?:였|이었|야|예요|입니다|다)|들켰)/.test(text);
+}

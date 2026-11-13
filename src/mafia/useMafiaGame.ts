@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { makeAI } from "./ai";
+import { makeAI, speakLastWords } from "./ai";
 import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
 import { detectClaims, interpretByRules, normalizeHuman } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
@@ -383,10 +383,11 @@ export function useMafiaGame(onError: (msg: string) => void) {
         await waitNext();
         if (!alivePhaseGuard(id)) return false;
         setSpeaking(accusedId);
-        const last = await engine.speak(ref.current!, ref.current!.players[accusedId], "[재판] 당신은 처형되었습니다. 남기는 마지막 한마디(유언)를 하세요.");
+        const dead = ref.current!.players[accusedId];
+        const last = await speakLastWords(engine, makeAI({ ...settings, mode: "mock" }, () => {}), ref.current!, dead);
         if (!alivePhaseGuard(id)) return false;
         setSpeaking(null);
-        commit((x) => addMsg(x, accusedId, last.text, "trial", last.emotion === "neutral" ? "sad" : last.emotion));
+        commit((x) => addMsg(x, accusedId, last.text, "trial", last.emotion === "neutral" ? (dead.role === "mafia" ? "smug" : "sad") : last.emotion));
       }
     } else {
       commit((x) => addMsg(x, "system", `반대가 많아 ${nm}님은 처형되지 않았습니다.`, "trial"));
