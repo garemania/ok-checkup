@@ -1007,9 +1007,9 @@ describe("in-app API self test", () => {
     const ai = makeAI(DEFAULT_SETTINGS, () => {});
     const seen: string[] = [];
     const results = await runSelfTest(ai, ai, "나", (r) => seen.push(r.title));
-    expect(results).toHaveLength(8);
-    expect(seen).toHaveLength(8);
-    for (const idx of [1, 2, 4, 5, 7]) {
+    expect(results).toHaveLength(9);
+    expect(seen).toHaveLength(9);
+    for (const idx of [1, 2, 4, 5, 7, 8]) {
       for (const c of results[idx].checks) expect(`${results[idx].title} / ${c.label}: ${c.ok}`).toContain(": true");
     }
   }, 60000);
@@ -1102,5 +1102,37 @@ describe("morning announcement hides why nobody died", () => {
     let s = { ...createGame("나"), day: 2 };
     s = addMsg(s, "system", "2일차 낮이 밝았습니다. 밤사이 아무도 죽지 않았습니다.", "day");
     expect(deductions(s).join(" ")).toContain("어느 쪽인지는 아무도 모른다");
+  });
+});
+
+describe("rule talk is not a role claim", () => {
+  const players = createGame("나").players;
+  it("'only the doctor can protect' is not a doctor claim or a save", async () => {
+    const { interpretByRules } = await import("./context");
+    for (const t of ["의사만 보호 능력이 있잖아", "보호는 원래 의사가 하는 거야", "경찰은 조사할 수 있잖아요"]) {
+      const m = interpretByRules(t, players, 0);
+      expect(m.claim).toBeUndefined();
+      expect(m.saves).toBeUndefined();
+      expect(m.reports).toBeUndefined();
+    }
+  });
+
+  it("drops a model interpretation that turned rule talk into a claim", async () => {
+    const { sanitizeMeaning, detectClaims } = await import("./context");
+    const wrong = { claim: "doctor" as const, saves: [{ target: 1 }], summary: "의사 주장" };
+    expect(sanitizeMeaning("의사만 보호 능력이 있다고 한 거야", wrong)).toEqual({ claim: undefined, saves: undefined, summary: undefined });
+    // 저장된 해석이 잘못되어 있어도 상황판에는 주장으로 나오지 않는다
+    let s = createGame("나");
+    s = addMsg(s, 0, "의사만 보호 능력이 있다고 한 거야");
+    s = { ...s, log: s.log.map((m) => ({ ...m, meaning: wrong })) };
+    expect(detectClaims(s)[0]).toBeUndefined();
+  });
+
+  it("real claims and saves still count", async () => {
+    const { interpretByRules, sanitizeMeaning } = await import("./context");
+    const m = interpretByRules("저 의사예요. 어젯밤 서연 보호했어요.", players, 0);
+    expect(m.claim).toBe("doctor");
+    expect(m.saves).toEqual([{ target: 1 }]);
+    expect(sanitizeMeaning("의사예요", { claim: "doctor" }).claim).toBe("doctor");
   });
 });

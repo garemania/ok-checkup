@@ -1,5 +1,5 @@
 import { speakLastWords, type AI } from "./ai";
-import { addressesDead, interpretByRules, isRepetitive, ruleViolations, deniesRevealedRole } from "./context";
+import { addressesDead, interpretByRules, isRepetitive, ruleViolations, deniesRevealedRole, sanitizeMeaning, detectClaims } from "./context";
 import { HUMAN_ID } from "./data";
 import { nextTurn, openerTurn, proxyHint } from "./director";
 import { addMsg, createGame, kill } from "./engine";
@@ -191,6 +191,24 @@ export async function runSelfTest(ai: AI, fallback: AI, nickname: string, onResu
       checks: [
         { label: "태오·하은이 아닌 사람이 끼어듦", ok: t.player.id !== 7 && t.player.id !== 3 },
         { label: "방금 나온 말을 되풀이하지 않음", ok: !isRepetitive(s, t.player.id, said.text) },
+      ],
+    });
+  }
+  // 9. 규칙을 말한 것은 직업 주장이 아님
+  {
+    let s: GameState = { ...game(nickname), day: 2, phase: "day" };
+    const text = "의사만 보호 능력이 있잖아요";
+    s = addMsg(s, HUMAN_ID, text, "day");
+    const raw = await ai.interpret(s, text);
+    const meaning = sanitizeMeaning(text, raw ?? interpretByRules(text, s.players, HUMAN_ID));
+    s = { ...s, log: s.log.map((m, i) => (i === s.log.length - 1 ? { ...m, meaning } : m)) };
+    const said = await ai.speak(s, s.players[2], `[반응:플레이어(${nickname})] 직전 발언(플레이어(${nickname}): "${text}")에 자연스럽게 반응하세요.`);
+    push({
+      title: "9. 규칙을 말한 것은 직업 주장이 아님",
+      lines: [`나: ${text}`, `해석: ${meaning.summary ?? "(직업 주장 아님)"}`, `도윤: ${said.text}`],
+      checks: [
+        { label: "의사 주장으로 해석하지 않음", ok: !meaning.claim && !meaning.saves && detectClaims(s)[HUMAN_ID] === undefined },
+        { label: "'의사라고 주장했다'고 말하지 않음", ok: !/의사\s*(?:라고|라며|를)?\s*(?:주장|했다가|라고 했)/.test(said.text) },
       ],
     });
   }

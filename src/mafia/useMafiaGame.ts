@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
 import { nextTurn, openerTurn } from "./director";
 import { AUTO_ADVANCE_MS, HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY, WATCH_LINES } from "./data";
-import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman } from "./context";
+import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman, sanitizeMeaning } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { ROLE_LABEL } from "./types";
 import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
@@ -367,11 +367,12 @@ export function useMafiaGame(onError: (msg: string) => void) {
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
     const msgId = ref.current!.nextMsgId - 1;
     // 자유 발언을 직업 주장/조사 보고로 해석해 둔다 (API: LLM 해석, 실패 또는 오프라인: 규칙 기반)
-    const llmMeaning = await ai().interpret(ref.current!, text.trim());
+    const llmRaw = await ai().interpret(ref.current!, text.trim());
+    const llmMeaning = llmRaw ? sanitizeMeaning(normalizeHuman(text, ref.current!.players).text, llmRaw) : null;
     if (!alivePhaseGuard(id)) return false;
     const wasPolice = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) })[HUMAN_ID] === "police";
     const prevClaims = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) });
-    const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice, prevClaims[HUMAN_ID] === "doctor");
+    const meaning = llmMeaning ?? sanitizeMeaning(normalizeHuman(text, ref.current!.players).text, interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice, prevClaims[HUMAN_ID] === "doctor"));
     if (llmMeaning) setMeaning(msgId, llmMeaning);
     const cur = ref.current!;
     const me0 = cur.players[HUMAN_ID].name;

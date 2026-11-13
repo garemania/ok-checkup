@@ -115,7 +115,28 @@ function verdictOf(window: string): "clean" | "mafia" | null {
  * "서연 조사했는데 마피아임", "조사해보니 서연 마피아", "서연=시민"처럼 자유로운 표현도 인식한다.
  * isPoliceClaimer: 이 화자가 이전에 이미 경찰을 주장했는지
  */
-const SAVE_CUE = /(보호|살렸|살려|지켰|지켜|치료)/;
+// 실제로 한 보호 행동 (과거형). "보호 능력", "보호할 수 있다" 같은 일반론은 해당하지 않는다
+const SAVE_CUE = /(보호했|보호함|보호해\s*줬|보호해\s*줌|살렸|살림|살려\s*줬|지켰|지킴|지켜\s*줬|치료했)/;
+
+const FIRST_PERSON_RE = /(?:^|[\s,.])(?:저|제가|저는|전|나|내가|난|나는)(?=[\s,.]|$)|(?:제가|내가)/;
+// 규칙·일반론: "의사만 보호 능력이 있다", "경찰은 조사할 수 있다", "원래 의사가 지킨다"
+const GENERIC_RE = /(능력|할\s*수\s*있|할\s*수\s*없|가능하|가능해|규칙|원래|만이|[가-힣]만\s|하는\s*거|하는\s*게|해야\s*(?:해|돼|한다))/;
+
+/**
+ * 해석 결과 정리: 규칙이나 일반론을 말한 것이면 직업 주장·보고로 보지 않는다.
+ * 자기 직업을 밝히는 말(나/저 + 직업)과 본인이 실제로 한 행동만 남긴다. (LLM 해석 결과에도 적용)
+ */
+export function sanitizeMeaning(text: string, meaning: Meaning): Meaning {
+  const firstPerson = FIRST_PERSON_RE.test(text);
+  const generic = GENERIC_RE.test(text);
+  const out: Meaning = { ...meaning };
+  if (out.claim && generic && !firstPerson) out.claim = undefined;
+  if (out.claim && !CLAIM_RE.test(text) && !new RegExp(`${ROLE_LABEL[out.claim]}\\s*(?:예요|이에요|입니다|이야|야|임|이다)`).test(text) && !firstPerson) out.claim = undefined;
+  if (out.saves && !SAVE_CUE.test(text)) out.saves = undefined;
+  if (out.reports && generic && !firstPerson && !/(조사해\s*보니|조사했|조사\s*결과)/.test(text)) out.reports = undefined;
+  if (out.summary && !out.claim && !out.saves && !out.reports) out.summary = undefined;
+  return out;
+}
 
 export function interpretByRules(text: string, players: Player[], speaker: number, isPoliceClaimer = false, isDoctorClaimer = false): Meaning {
   const norm = normalizeHuman(text, players).text;
@@ -129,7 +150,7 @@ export function interpretByRules(text: string, players: Player[], speaker: numbe
 
   // 의사의 보호 보고: "○○ 보호했어", "○○ 살렸다" -> 경찰 조사로 보지 않는다
   const saves: NonNullable<Meaning["saves"]> = [];
-  const doctorTalk = claim === "doctor" || isDoctorClaimer || (SAVE_CUE.test(norm) && /의사/.test(norm));
+  const doctorTalk = claim === "doctor" || isDoctorClaimer || (SAVE_CUE.test(norm) && /의사/.test(norm) && FIRST_PERSON_RE.test(norm));
   if (SAVE_CUE.test(norm) && (doctorTalk || claim !== "police")) {
     found.forEach(({ q, at }, i) => {
       const end = i + 1 < found.length ? found[i + 1].at : norm.length;
@@ -171,7 +192,8 @@ function meaningsInOrder(s: GameState): { m: ChatMsg; meaning: Meaning }[] {
   const out: { m: ChatMsg; meaning: Meaning }[] = [];
   for (const m of s.log) {
     if (m.from === "system") continue;
-    const meaning = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from), doctorClaimers.has(m.from));
+    const raw = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from), doctorClaimers.has(m.from));
+    const meaning = sanitizeMeaning(normalizeHuman(m.text, s.players).text, raw);
     if (meaning.claim === "police") policeClaimers.add(m.from);
     if (meaning.claim === "doctor") doctorClaimers.add(m.from);
     out.push({ m, meaning });
