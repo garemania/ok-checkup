@@ -1,5 +1,5 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
-import { addressesDead, deniesRevealedRole, detectClaims, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -122,7 +122,9 @@ async function callAnthropic(settings: Settings, system: string, user: string, m
 const RULEBOOK = `[게임 규칙 전체]
 1. 구성과 승리: 마피아 2, 경찰 1, 의사 1, 군인 1, 시민 3(총 8명). 마피아가 전멸하면 시민 팀 승리, 마피아 수가 시민 팀 수 이상이면 마피아 승리.
 2. 진행: 1일차 밤(마피아의 살해만 없음. 경찰 조사 등 다른 능력은 첫 밤에도 정상적으로 사용 가능) -> 낮(토론과 행동) -> 투표(최다 득표자 지목, 동점이면 무효) -> 최후의 변론 -> 찬반 투표(찬성이 반대보다 많으면 처형, 직업 공개, 유언) -> 밤(마피아 살해, 의사 보호, 경찰 조사) -> 다음 낮.
-   중요: "첫 밤에는 살해가 없다"는 것은 마피아의 습격이 없다는 뜻이지 경찰의 조사가 불가능하다는 뜻이 아니다. 따라서 경찰이 "첫날 밤에 조사했다"고 보고하는 것은 규칙상 정상이며 의심 근거가 아니다. 의사의 보호가 필요 없는 것도 첫 밤에 습격이 없기 때문일 뿐이다.
+   중요: "첫 밤에는 살해가 없다"는 것은 마피아의 습격이 없다는 뜻이지 경찰의 조사가 불가능하다는 뜻이 아니다. 따라서 경찰이 "첫날 밤에 조사했다"고 보고하는 것은 규칙상 정상이며 의심 근거가 아니다.
+   첫 밤에 하는 일은 경찰의 조사뿐이다. 의사는 첫 밤에 보호를 하지 않고(보호 행동 자체가 없다), 마피아는 살해하지 않으며, 시민과 군인은 원래 밤에 하는 일이 없다. 따라서 "첫 밤에 누구를 보호했냐", "첫 밤 보호 선택" 같은 말은 규칙에 없는 이야기이므로 하지 않는다. 의사의 보호는 둘째 밤부터 있다.
+   시민과 군인은 밤에 아무 행동도 하지 않으므로, 그들에게 "밤에 뭘 했냐"고 묻는 것은 의미가 없다.
 3. 직업과 그 한계:
  - 마피아: 동료를 알고 있다. 밤마다 시민 팀 1명을 살해한다. 낮에는 시민인 척 연기하며 경찰/의사를 사칭해도 된다.
  - 경찰: 밤마다 1명을 조사해 그 사람이 "마피아인지 아닌지"만 알 수 있다. 정확한 직업(의사/군인/시민)은 알 수 없다. 대화에서 "X는 시민이다"라고 보고하면 "조사했더니 X는 마피아가 아니었다"는 뜻이다. 진짜 경찰은 단 1명이다.
@@ -278,6 +280,7 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
     const out: string[] = [];
     if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
     const dead = addressesDead(s, text, p.id);
+    out.push(...ruleViolations(text));
     if (dead !== null) out.push(`${s.players[dead].name}은(는) 이미 사망해서 말도 대답도 할 수 없습니다. 죽은 사람에게 묻거나 대답을 요구하지 말고 살아 있는 사람에게 말하세요. (생전의 발언을 근거로 언급하는 것은 괜찮습니다.)`);
     return out;
   };
@@ -492,8 +495,8 @@ function makeMockAI(): AI {
       }
       if (hint?.startsWith("[질문]")) {
         return pick(informal
-          ? ["그 시간엔 그냥 자고 있었지. 의심하려면 증거를 가져와.", "난 시민이라 별 행동 없었어. 더 물어볼 거 있어?"]
-          : ["그 시간에는 그냥 쉬고 있었습니다. 특별한 일은 없었어요.", "저는 시민으로서 지켜보고 있었을 뿐입니다."]);
+          ? ["내 말 중에 뭐가 의심스러운지 짚어 봐. 그럼 설명해 줄게.", "의심하는 건 자유지만 근거는 대야지. 내 말은 처음부터 일관됐어."]
+          : ["제 말 중에 어떤 부분이 의심스러운지 짚어 주시면 설명드릴게요.", "의심은 이해하지만, 제 발언은 처음부터 일관됐다고 생각해요. 근거를 말씀해 주세요."]);
       }
       if (hint?.startsWith("[옹호]")) {
         return pick(informal ? ["고맙다. 나도 널 믿는다.", "그래, 그렇게 봐 주니 든든하네."] : ["감사합니다. 저도 믿고 있어요.", "그렇게 봐 주셔서 고맙습니다."]);

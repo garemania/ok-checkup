@@ -200,7 +200,7 @@ export function factsBlock(s: GameState): string {
 
   lines.push(`생존자(${living.length}명, 이 사람들만 말하고 투표할 수 있음): ${living.map((p) => p.name + (claims[p.id] ? `(${ROLE_LABEL[claims[p.id]]} 주장)` : "")).join(", ")}`);
   lines.push(`사망자(${dead.length}명, 이미 죽어서 말도 대답도 투표도 못 함. 말을 걸지 말 것): ${dead.map((p) => `${p.name}(${deathText(p)})`).join(", ") || "없음"}`);
-  lines.push("규칙 확인: 첫 밤에도 경찰 조사는 가능하다(첫 밤에 없는 것은 마피아의 살해뿐). 밤에 살해된 사람의 직업은 공개되지 않는다.");
+  lines.push("규칙 확인: 첫 밤에 하는 일은 경찰 조사뿐이다(마피아 살해 없음, 의사 보호 없음). 의사 보호는 둘째 밤부터. 밤에 살해된 사람의 직업은 공개되지 않는다.");
 
   if (reports.length)
     lines.push(
@@ -316,4 +316,15 @@ export function addressesDead(s: GameState, text: string, speaker: number): numb
 export function deniesRevealedRole(text: string, role: Role): boolean {
   if (role === "mafia") return /(억울|마피아가?\s*아니|마피아\s*아님|결백|무고|(?:저는|난|나는|전)\s*시민|시민(?:이에요|이야|이다|입니다)|오해)/.test(text);
   return /((?:제가|내가|저는|난|나는)\s*마피아(?:였|이었|야|예요|입니다|다)|들켰)/.test(text);
+}
+
+/** 규칙에 어긋나는 말 (첫 밤의 의사 보호, 첫 밤의 조사 불가 등). 문제가 있으면 설명을 돌려준다 */
+export function ruleViolations(text: string): string[] {
+  const out: string[] = [];
+  const firstNight = /(첫\s*밤|첫날\s*밤|첫\s*날\s*밤|1일차\s*밤|첫\s*밤에)/;
+  if (firstNight.test(text) && /(보호|살렸|살려|치료|지켰)/.test(text) && !/(보호(?:가|는|도)?\s*(?:없|안\s*하|하지\s*않))/.test(text))
+    out.push("첫 밤에는 의사의 보호 행동 자체가 없습니다. 첫 밤의 보호를 언급하지 마세요.");
+  if (firstNight.test(text) && /조사/.test(text) && /(불가|못\s*해|못\s*하|할\s*수\s*없|안\s*돼|안\s*되)/.test(text))
+    out.push("첫 밤에도 경찰 조사는 가능합니다. 조사가 불가능하다고 말하지 마세요.");
+  return out;
 }

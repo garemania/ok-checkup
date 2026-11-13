@@ -303,9 +303,9 @@ export function useMafiaGame(onError: (msg: string) => void) {
         emotion = "happy";
         items = [{ player: t, hint: `[옹호] ${me0}가 당신을 믿는다고 공개적으로 말했습니다. 짧게 반응하세요.` }];
       } else {
-        text = `${t.name}님, 어젯밤에 무엇을 하셨는지 말해 주세요.`;
+        text = `${t.name}님, 지금까지 하신 말이 의심됩니다.`;
         emotion = "suspicious";
-        items = [{ player: t, hint: `[질문] ${me0}가 당신에게 직접 질문했습니다: "어젯밤에 무엇을 하셨나요?" 당신의 직업과 전략에 맞게 답하세요.` }];
+        items = [{ player: t, hint: `[질문] ${me0}가 당신의 지금까지의 발언이 의심된다고 공개적으로 추궁했습니다. 당신의 직업과 전략에 맞게 해명하거나 반박하세요. (밤에 무엇을 했는지 묻는 말이 아닙니다.)` }];
       }
     }
     commit((x) => ({ ...addMsg(x, HUMAN_ID, text, undefined, emotion), actionsUsed: x.actionsUsed + 1 }));

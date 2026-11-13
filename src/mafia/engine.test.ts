@@ -462,7 +462,7 @@ describe("typo tolerance and first-night rule", () => {
     expect(t).toContain("오타 보정");
     expect(t).toContain("서연님, 저는 경찰입니다");
     expect(t).toContain("원문: 서현님, 저는 경창입니다");
-    expect(factsBlock(s)).toContain("첫 밤에도 경찰 조사는 가능");
+    expect(factsBlock(s)).toContain("첫 밤에 하는 일은 경찰 조사뿐이다");
   });
 
   it("includes both rules in the rulebook sent to the model", async () => {
@@ -651,4 +651,41 @@ describe("last words after execution", () => {
     const good = { speak: async () => ({ text: "잘 찾아내셨네요.", emotion: "smug" as const }) } as unknown as ReturnType<typeof makeAI>;
     expect((await speakLastWords(good, fallback, s, mafia)).text).toBe("잘 찾아내셨네요.");
   });
+});
+
+describe("first-night rules and pressing", () => {
+  it("flags talk about first-night protection or a first-night investigation ban", async () => {
+    const { ruleViolations } = await import("./context");
+    expect(ruleViolations("의사라고 했으니 첫 밤 보호 선택은 확인이 안 되지만")).toHaveLength(1);
+    expect(ruleViolations("1일차 밤엔 조사 불가라고 했잖아")).toHaveLength(1);
+    expect(ruleViolations("첫 밤에는 보호가 없으니 의사 주장은 아직 확인할 게 없네")).toHaveLength(0);
+    expect(ruleViolations("어젯밤 도윤님이 죽었으니 의사가 못 지킨 거네")).toHaveLength(0);
+  });
+
+  it("rewrites a line that mentions first-night protection", async () => {
+    const orig = globalThis.fetch;
+    const replies = ["[suspicious] 첫 밤 보호 선택은 확인이 안 되지만 지켜볼게요.", "[suspicious] 의사 주장은 둘째 밤부터 지켜볼게요."];
+    let n = 0;
+    let last = "";
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      last = JSON.parse(init.body as string).contents[0].parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: replies[Math.min(n++, 1)] }] } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const ai = makeAI({ ...DEFAULT_SETTINGS, mode: "api", provider: "gemini", geminiKey: "k" }, () => {});
+      const said = await ai.speak(createGame("나"), createGame("나").players[2]);
+      expect(n).toBe(2);
+      expect(last).toContain("첫 밤에는 의사의 보호 행동 자체가 없습니다");
+      expect(said.text).toBe("의사 주장은 둘째 밤부터 지켜볼게요.");
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it("offline replies to pressing defend statements, not night actions", async () => {
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    const s = createGame("나");
+    for (let i = 0; i < 5; i++) {
+      const r = await ai.speak(s, s.players[1], "[질문] 플레이어가 당신의 발언이 의심된다고 추궁했습니다.");
+      expect(r.text).not.toMatch(/그 시간|쉬고 있었|자고 있었/);
+    }
+  }, 30000);
 });
