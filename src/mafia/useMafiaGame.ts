@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
+import { nextTurn, openerTurn } from "./director";
 import { HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY } from "./data";
 import { detectClaims, interpretByRules, normalizeHuman } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
@@ -65,6 +66,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setAwaitingHuman(false);
     r?.(v);
   };
+  // AI들이 대화하는 도중(다음 대기 중) 사용자가 끼어들어 한 말
+  const interruptRef = useRef<string | null>(null);
   const advance = useCallback(() => {
     const r = nextResolver.current;
     nextResolver.current = null;
@@ -93,6 +96,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   /* ---------------- 게임 시작 ---------------- */
   const startGame = () => {
     runId.current++;
+    interruptRef.current = null;
     advance();
     resolveHuman(null);
     ref.current = createGame(settings.nickname);
@@ -106,6 +110,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
 
   const quit = () => {
     runId.current++;
+    interruptRef.current = null;
     advance();
     resolveHuman(null);
     ref.current = null;
@@ -150,6 +155,17 @@ export function useMafiaGame(onError: (msg: string) => void) {
     commit((x) => ({ ...x, lastNightResult: result, phase: "day", round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0 }));
     commit((x) => addMsg(x, "system", `${x.day}일차 낮이 밝았습니다. ${result}`, "day"));
     commit(finishIfWon);
+    if (ref.current!.phase === "day") {
+      // 아침 안내를 읽고 "다음"을 누르면 한 명이 토론의 첫 마디를 꺼낸다
+      await waitNext();
+      if (!alivePhaseGuard(id)) return;
+      const opener = openerTurn(ref.current!);
+      if (opener) {
+        const ok = await converse(id, 1, opener);
+        if (!ok) return;
+      }
+    }
+    setSpeaking(null);
     setBusy(false);
   };
 
@@ -163,32 +179,51 @@ export function useMafiaGame(onError: (msg: string) => void) {
   }, [state?.phase, state?.day, busy]);
 
   /* ---------------- 낮 토론 ---------------- */
-  const speakerOrder = () => [...aliveAI(ref.current!)].sort(() => Math.random() - 0.5);
 
+  /** 대화 한 묶음: 진행자가 고른 사람이 차례로 말한다 (3~5줄). 버튼 "대화 진행" */
   const runRound = async () => {
     const s0 = ref.current;
     if (!s0 || busy || s0.phase !== "day" || s0.round >= MAX_ROUNDS) return;
     const id = runId.current;
     setBusy(true);
-    const engine = ai();
-    const order = speakerOrder();
-    for (let i = 0; i < order.length; i++) {
-      const p = order[i];
-      if (!alivePhaseGuard(id)) return;
-      setSpeaking(p.id);
-      const said = await engine.speak(ref.current!, ref.current!.players[p.id]);
-      if (!alivePhaseGuard(id)) return;
-      setSpeaking(null);
-      commit((x) => addMsg(x, p.id, said.text, undefined, said.emotion));
-      if (i < order.length - 1) {
-        await waitNext(); // 마지막 발언은 멈추지 않고 바로 조작 가능
-        if (!alivePhaseGuard(id)) return;
-      }
-    }
-    setSpeaking(null);
     commit((x) => ({ ...x, round: x.round + 1 }));
+    const lines = 3 + Math.floor(Math.random() * 3);
+    const ok = await converse(id, lines);
+    if (!ok) return;
+    setSpeaking(null);
     setBusy(false);
   };
+
+  /** 진행자가 정한 순서로 n줄 대화. 마지막 줄 뒤에는 멈추지 않는다. 사용자가 끼어들면 그 말을 처리하고 끝낸다. 중단되면 false */
+  const converse = async (id: number, lines: number, first?: ReturnType<typeof nextTurn>): Promise<boolean> => {
+    const engine = ai();
+    for (let i = 0; i < lines; i++) {
+      if (!alivePhaseGuard(id)) return false;
+      const turn = i === 0 && first ? first : nextTurn(ref.current!);
+      if (!turn) break;
+      setSpeaking(turn.player.id);
+      const said = await engine.speak(ref.current!, ref.current!.players[turn.player.id], turn.hint);
+      if (!alivePhaseGuard(id)) return false;
+      setSpeaking(null);
+      commit((x) => addMsg(x, turn.player.id, said.text, undefined, said.emotion));
+      if (i < lines - 1) {
+        await waitNext();
+        if (!alivePhaseGuard(id)) return false;
+        if (await handleInterrupt(id)) return alivePhaseGuard(id);
+      }
+    }
+    return true;
+  };
+
+  /** 대기 중 끼어든 말이 있으면 처리한다. 처리했으면 true */
+  const handleInterrupt = async (id: number): Promise<boolean> => {
+    const t = interruptRef.current;
+    if (!t) return false;
+    interruptRef.current = null;
+    await humanSpeaks(id, t);
+    return true;
+  };
+
 
   /** 지정한 캐릭터들이 한 줄씩 말한다 (마지막 줄 전까지는 "다음"을 기다린다). 중단되면 false */
   const respond = async (id: number, items: { player: Player; hint: string }[]): Promise<boolean> => {
@@ -204,6 +239,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
       if (i < items.length - 1) {
         await waitNext();
         if (!alivePhaseGuard(id)) return false;
+        if (await handleInterrupt(id)) return alivePhaseGuard(id);
       }
     }
     return true;
@@ -233,16 +269,13 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const setMeaning = (msgId: number, meaning: Meaning) =>
     commit((x) => ({ ...x, log: x.log.map((m) => (m.id === msgId ? { ...m, meaning } : m)) }));
 
-  const sendPublic = async (text: string) => {
-    const s0 = ref.current;
-    if (!s0 || busy || !text.trim() || !s0.players[HUMAN_ID].alive || s0.phase !== "day") return;
-    const id = runId.current;
+  /** 사람 플레이어의 발언을 기록하고, 해석한 뒤, 알맞은 캐릭터들이 반응한다 (busy 상태에서 호출) */
+  const humanSpeaks = async (id: number, text: string): Promise<boolean> => {
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
     const msgId = ref.current!.nextMsgId - 1;
-    setBusy(true);
     // 자유 발언을 직업 주장/조사 보고로 해석해 둔다 (API: LLM 해석, 실패 또는 오프라인: 규칙 기반)
     const llmMeaning = await ai().interpret(ref.current!, text.trim());
-    if (!alivePhaseGuard(id)) return;
+    if (!alivePhaseGuard(id)) return false;
     const wasPolice = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) })[HUMAN_ID] === "police";
     const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice);
     if (llmMeaning) setMeaning(msgId, llmMeaning);
@@ -264,7 +297,23 @@ export function useMafiaGame(onError: (msg: string) => void) {
         hint: `플레이어(${me0})가 방금 발언했습니다.${meaning.summary ? ` (발언 해석: ${meaning.summary})` : ""} ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
       }));
     }
-    const ok = await respond(id, items);
+    return respond(id, items);
+  };
+
+  const sendPublic = async (text: string) => {
+    const s0 = ref.current;
+    if (!s0 || !text.trim() || !s0.players[HUMAN_ID].alive || s0.phase !== "day") return;
+    if (busy) {
+      // AI들이 대화하는 중 "다음"을 기다리는 동안이면 끼어든다
+      if (waiting && !interruptRef.current) {
+        interruptRef.current = text.trim();
+        advance();
+      }
+      return;
+    }
+    const id = runId.current;
+    setBusy(true);
+    const ok = await humanSpeaks(id, text.trim());
     if (!ok) return;
     setSpeaking(null);
     setBusy(false);

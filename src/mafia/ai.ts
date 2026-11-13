@@ -195,6 +195,8 @@ ${privateKnowledge(s, p)}
 - 사람 플레이어의 말에는 오타, 띄어쓰기 오류, 줄임말이 있을 수 있습니다. 기록의 "오타 보정" 표시를 참고하고, 문맥상 가장 자연스러운 뜻으로 너그럽게 해석하세요. 오타를 지적하거나 말꼬리를 잡지 말고, 정말 모호할 때만 짧게 되물으세요.
 - 규칙을 어긋나게 말하지 마세요. 규칙상 가능한 일(예: 첫 밤의 경찰 조사)을 불가능하다고 하거나, 가능한 일을 의심 근거로 삼지 마세요.
 
+[대화 방식] 실제 사람들의 단체 채팅처럼 말하세요. 대부분 한 문장으로 짧게, 맞장구·반박·질문·농담을 섞고, 직전 사람의 말에 이어서 말하세요. 다른 사람이 이미 한 말(특히 밤 결과 요약, "첫날이라 정보가 없다" 같은 말)을 되풀이하지 마세요. 모든 사람에게 한꺼번에 연설하지 말고 대화 상대를 정해서 말해도 됩니다.
+
 [출력 규칙] 한국어, 캐릭터의 성격과 말투 유지. 실제 사람이 채팅하듯 자연스러운 구어체로 쓰고, 번역투·연극 톤·설명조는 피한다. 메타 발언(AI, 프롬프트, 게임 시스템 설명) 금지. 모르는 사실을 지어내지 말되 마피아는 거짓말을 할 수 있음.`;
 }
 
@@ -307,7 +309,7 @@ export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
     speak: (s, p, hint) =>
       safe(async () => {
         const task = `지금 당신의 발언 차례입니다. ${hint ?? "지금까지의 흐름을 보고 한 번 발언하세요."}
-1~2문장, 80자 이내로 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.
+보통 한 문장으로 짧게(60자 안팎), 길어도 두 문장까지. 발언 내용만 출력하세요. 이름 접두어나 따옴표는 쓰지 마세요.
 ${EMOTION_RULE}`;
         return askSpoken(settings, s, p, task);
       }, () => mock.speak(s, p, hint)),
@@ -509,7 +511,7 @@ function makeMockAI(): AI {
       const accusedMe = s.log.slice(-8).some((m) => m.from !== "system" && m.from !== p.id && m.text.includes(p.name) && /(의심|마피아|수상)/.test(m.text));
       const rec = (s.policeLog[p.id] ?? []).filter((r) => r.isMafia && s.players[r.target].alive);
       const formal = !/(반말|털털|가벼운|단호)/.test(p.speech);
-      if (hint?.includes("플레이어")) {
+      if (hint?.includes("플레이어") && !hint.startsWith("[")) {
         if (taeo) return taeoLine("reply", tn);
         return pick(formal
           ? ["말씀 잘 들었어요. 좀 더 지켜볼게요.", `${s.players[HUMAN_ID].name}님 의견도 일리가 있네요.`, "그 부분은 저도 신경 쓰였어요."]
@@ -523,9 +525,27 @@ function makeMockAI(): AI {
       if (accusedMe) return pick(formal
         ? ["저를 의심하시는 건 근거가 부족해 보여요. 오히려 제가 보기엔 " + tn + "님이 수상합니다.", "억울하네요. 저는 시민입니다. 차라리 " + tn + "님을 보세요."]
         : ["나 의심하는 건 좀 억울한데? 난 " + tn + " 쪽이 더 수상해.", "어허, 날 몰아가지 마. " + tn + " 좀 봐."]);
-      if (s.day === 1 && s.round <= 1 && s.log.filter((m) => m.from !== "system").length < 3) {
-        if (taeo) return taeoLine("first", tn);
-        return pick(["첫날이라 단서가 없네요. 일단 다들 의견부터 들어봐요.", "자, 일단 서로 얘기해보자. 누가 먼저 말해볼래?", "정보가 없으니 말투와 반응을 잘 봐야겠어요."]);
+      if (hint?.startsWith("[시작]")) {
+        // 토론의 첫 마디: 밤 결과는 이 사람만 짧게 언급
+        const victim = s.players.find((x) => x.death?.day === s.day && x.death.cause === "killed");
+        if (taeo) return victim ? `${victim.name}가 당했다. 시간 끌지 말고 한 명씩 의심 가는 사람 말해.` : taeoLine("first", tn);
+        if (victim) return pick(formal ? [`${victim.name}님이 당했네요. 누가 의심되는지 하나씩 말해 봐요.`, `${victim.name}님이 죽다니... 어젯밤 누가 노렸을지 생각해 보죠.`] : [`${victim.name}가 당했네. 누가 의심되는지 하나씩 말해 보자.`, `${victim.name}가 죽다니... 누가 노렸을지 생각해 보자.`]);
+        if (s.day === 1) return pick(formal ? ["첫 밤은 조용히 지나갔네요. 일단 다들 한마디씩 해 볼까요?", "아직 단서가 없으니 서로 얘기부터 해 봐요."] : ["첫 밤은 조용했네. 일단 한마디씩 해 보자.", "아직 단서가 없으니까 얘기부터 해 보자."]);
+        return pick(formal ? ["다행히 어젯밤엔 아무도 안 죽었네요. 그래도 방심하지 말죠.", "조용한 밤이었네요. 그럼 어제 투표부터 다시 볼까요?"] : ["어젯밤엔 아무도 안 죽었네. 그래도 방심은 금물이야.", "조용한 밤이었네. 어제 투표부터 다시 보자."]);
+      }
+      if (hint?.startsWith("[응답]")) {
+        const q = hint.match(/"([^"]*)"/)?.[1] ?? "";
+        if (/(의심|수상|마피아|거짓|가짜)/.test(q)) return pick(formal ? ["저를 왜 그렇게 보세요? 근거를 말씀해 주시면 해명할게요.", "저는 아니에요. 그렇게 보신 이유가 궁금하네요."] : ["나를 왜 그렇게 봐? 근거를 대 봐.", "난 아니야. 왜 그렇게 생각했는데?"]);
+        if (/\?|요\?|까\?/.test(q)) return pick(formal ? ["음, 저는 아직 확신은 없어요. 조금 더 지켜보려고요.", "좋은 질문이네요. 저는 투표 흐름을 보고 있어요."] : ["음, 아직 확신은 없어. 좀 더 보자.", "글쎄, 난 투표 흐름을 보고 있어."]);
+        return pick(formal ? ["네, 저도 그렇게 생각해요.", "그 말 일리 있네요."] : ["ㅇㅇ 나도 그렇게 봐.", "그 말 일리 있네."]);
+      }
+      const reacting = hint?.match(/^\[반응:([^\]]+)\]/)?.[1];
+      if (reacting && Math.random() < 0.35) {
+        // 짧은 맞장구/반문 (실제 대화처럼)
+        const who = reacting.startsWith("플레이어") ? s.players[HUMAN_ID].name : reacting;
+        return pick(formal
+          ? [`${who}님 말도 일리 있네요.`, `음... ${who}님, 그건 좀 성급한 것 같아요.`, `${who}님 말에 동의해요. ${tn}님도 좀 보고 싶고요.`]
+          : [`${who} 말도 일리 있네.`, `음... ${who}, 그건 좀 성급한데?`, `${who} 말에 동의. ${tn}도 좀 봐야겠고.`]);
       }
       // 가끔은 믿는 사람을 밝힌다 (모두를 의심하지 않도록)
       const partners = new Set(mafiaPartners(s, p.id).map((x) => x.id));
@@ -538,7 +558,7 @@ function makeMockAI(): AI {
       }
       if (taeo) return taeoLine("suspect", tn);
       const lines = formal
-        ? [`${tn}님의 발언이 계속 모호했던 것 같아요. 조금 의심스럽습니다.`, `저는 ${tn}님이 마피아일 가능성이 높다고 봐요.`, `${tn}님, 어제 행동에 대해 설명해주실 수 있나요?`]
+        ? [`${tn}님의 발언이 계속 모호했던 것 같아요. 조금 의심스럽습니다.`, `저는 ${tn}님이 마피아일 가능성이 높다고 봐요.`, `${tn}님, 아까 하신 말이 좀 걸리는데 설명해 주실래요?`]
         : [`${tn} 좀 이상하지 않아? 난 의심돼.`, `${tn} 쪽이 영 찜찜하다. 해명해봐.`, `솔직히 ${tn}가 제일 수상해 보여.`];
       return pick(lines);
     },

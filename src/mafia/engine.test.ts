@@ -698,3 +698,63 @@ describe("build info", () => {
     expect(BUILD_LABEL).toContain("업데이트");
   });
 });
+
+describe("conversation director", () => {
+  it("lets the addressed person answer next", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 1, "태오, 아까 한 말 설명해 봐.", "day");
+    const t = nextTurn(s)!;
+    expect(t.player.id).toBe(7);
+    expect(t.reason).toBe("addressed");
+    expect(t.hint).toContain("[응답]");
+  });
+
+  it("lets the suspected person push back", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = addMsg(s, 2, "솔직히 민재가 제일 수상해.", "day");
+    const t = nextTurn(s)!;
+    expect(t.player.id).toBe(5);
+    expect(t.reason).toBe("accused");
+  });
+
+  it("otherwise picks a living AI who did not just speak", async () => {
+    const { nextTurn } = await import("./director");
+    let s = createGame("나");
+    s = kill(s, 3, false);
+    s = addMsg(s, 1, "다들 어떻게 생각해요", "day");
+    s = addMsg(s, 2, "음 글쎄", "day");
+    for (let i = 0; i < 30; i++) {
+      const t = nextTurn(s)!;
+      expect([1, 2, 3, 0]).not.toContain(t.player.id);
+      expect(t.hint).toContain("되풀이하지 마세요");
+    }
+  });
+
+  it("opener mentions the night result once and only one person opens", async () => {
+    const { openerTurn } = await import("./director");
+    const s = { ...createGame("나"), phase: "day" as const, lastNightResult: "첫 밤은 조용히 지나갔습니다." };
+    const t = openerTurn(s)!;
+    expect(t.reason).toBe("opener");
+    expect(t.hint).toContain("첫 밤은 조용히 지나갔습니다.");
+    expect(t.hint).toContain("한 번만");
+  });
+
+  it("offline opener and reactions do not repeat the 'first day, no clues' line for everyone", async () => {
+    const { nextTurn, openerTurn } = await import("./director");
+    const ai = makeAI(DEFAULT_SETTINGS, () => {});
+    let s: ReturnType<typeof createGame> = { ...createGame("나"), phase: "day", lastNightResult: "첫 밤은 조용히 지나갔습니다." };
+    const op = openerTurn(s)!;
+    const first = await ai.speak(s, op.player, op.hint);
+    s = addMsg(s, op.player.id, first.text, "day");
+    let mentions = /첫 밤|첫날|단서가 없/.test(first.text) ? 1 : 0;
+    for (let i = 0; i < 5; i++) {
+      const t = nextTurn(s)!;
+      const said = await ai.speak(s, t.player, t.hint);
+      s = addMsg(s, t.player.id, said.text, "day");
+      if (/첫 밤|첫날|단서가 없/.test(said.text)) mentions++;
+    }
+    expect(mentions).toBeLessThanOrEqual(1);
+  }, 30000);
+});
