@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,10 @@ interface Props {
   onWatch: () => void;
   onStopWatch: () => void;
   awaitingHuman: boolean;
+  guesses?: Record<number, Role | null>; // 내 직업 추정 메모 (대상 고르기에 표시)
   target: number | null;
+  talkTo: number | null; // 말을 걸 대상 (얼굴을 누르거나 목록에서 고름, 없으면 모두에게)
+  setTalkTo: (id: number | null) => void;
   setTarget: (id: number | null) => void;
   onNight: (target?: number) => void;
   onRound: () => void;
@@ -34,7 +37,7 @@ interface Props {
 
 const NIGHT_TEXT = {
   mafia: { title: "오늘 밤 제거할 사람을 고르세요", cta: "살해 확정" },
-  doctor: { title: "오늘 밤 보호할 사람을 고르세요 (본인 가능)", cta: "보호 확정" },
+  doctor: { title: "오늘 밤 보호할 사람을 고르세요 (본인은 보호할 수 없음)", cta: "보호 확정" },
   police: { title: "오늘 밤 조사할 사람을 고르세요", cta: "조사 확정" },
 } as const;
 
@@ -48,9 +51,10 @@ const ACTIONS = [
 type ActionKind = (typeof ACTIONS)[number]["kind"];
 const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
-export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, target, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
+export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, guesses = {}, target, talkTo, setTalkTo, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
-  const [talkTo, setTalkTo] = useState<number | null>(null); // 공개적으로 말을 걸 대상 (없으면 모두에게)
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (talkTo !== null) inputRef.current?.focus(); }, [talkTo]);
   const [defense, setDefense] = useState("");
   const [mode, setMode] = useState<ActionKind | null>(null);
   const [claimRole, setClaimRole] = useState<Role | null>(null);
@@ -68,6 +72,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
       >
         <FaceArt look={p.look} hue={p.color} emotion="neutral" className="h-6 w-6 rounded" />
         {p.name}
+        {guesses[id] && <span className="inline-flex items-center gap-0.5 text-[10px] opacity-80"><RoleIcon role={guesses[id]!} className="h-3 w-3" />{ROLE_LABEL[guesses[id]!]}?</span>}
       </button>
     );
   };
@@ -101,7 +106,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
           <p className="text-sm font-medium">첫 밤입니다. 아직 아무도 습격당하지 않습니다.</p>
           <p className="text-sm text-muted-foreground">
             {me.role === "mafia"
-              ? `동료는 ${partners.map((p) => p.name).join(", ")}입니다. 얼굴을 눌러 1:1로 작전을 상의할 수 있습니다. 습격은 둘째 밤부터 가능합니다.`
+              ? `동료는 ${partners.map((p) => p.name).join(", ")}입니다. 습격은 둘째 밤부터 가능합니다.`
               : me.role === "doctor"
                 ? "보호는 둘째 밤부터 필요합니다. 오늘은 쉬세요."
                 : me.role === "soldier"
@@ -126,8 +131,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
     return (
       <div className="space-y-3 p-4">
         <p className="flex items-center gap-1.5 text-sm font-medium"><RoleIcon role={me.role} />{cfg.title}</p>
-        {me.role === "mafia" && <p className="text-xs text-muted-foreground">동료 얼굴을 눌러 1:1로 작전을 상의할 수 있습니다.</p>}
-        <TargetPicker includeSelf={me.role === "doctor"} excludeMafia />
+        <TargetPicker includeSelf={false} excludeMafia />
         <Button className="w-full" disabled={target === null} onClick={() => { onNight(target!); setTarget(null); }}>{cfg.cta}</Button>
       </div>
     );
@@ -267,6 +271,7 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
           ))}
         </select>
         <Input
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={!me.alive ? "사망하여 발언할 수 없습니다" : talkTo !== null ? `${state.players[talkTo].name}에게 말하기 (모두가 들음)` : busy && waiting ? "끼어들어 말하기..." : "모두에게 발언하기..."}

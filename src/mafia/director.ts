@@ -13,6 +13,27 @@ export interface Turn {
   hint: string;
   reason: "opener" | "addressed" | "accused" | "free";
   proxy?: boolean; // 사람 플레이어 대신 자동으로 하는 말
+  replyTo?: number; // 답하는 대상 메시지 id
+}
+
+/** 질문인지 (물음표, 의문형 어미, "왜/누구/뭐") */
+export const isQuestion = (t: string) => /\?|(?:나요|까요|가요|인가요|는지|했어요|했냐|하냐|했니|뭐야|뭔데)(?:[.!~\s]|$)|(?:^|\s)(?:왜|누구|뭐|무슨|어떻게)/.test(t);
+
+const ANSWER_RULE = "첫 문장에서 그 질문에 직접 답하세요(예/아니오, 이유, 누구인지 등). 모르면 모른다고 분명히 말하세요. 질문으로 되묻거나 다른 사람 얘기로 넘기지 마세요.";
+
+/** 아직 답을 듣지 못한 질문: 살아 있는 AI에게 물었는데 그 사람이 그 뒤로 한 번도 말하지 않은 것 (최근 6줄) */
+export function pendingQuestion(s: GameState): { to: Player; q: ChatMsg } | null {
+  const talk = s.log.filter((m) => m.from !== "system" && m.day === s.day);
+  for (let i = talk.length - 1; i >= Math.max(0, talk.length - 6); i--) {
+    const m = talk[i];
+    const to = addresseeOf(s, m);
+    if (to === null || to === m.from) continue;
+    const p = s.players[to];
+    if (!p.alive || p.isHuman || !isQuestion(m.text)) continue;
+    if (talk.slice(i + 1).some((x) => x.from === to)) continue;
+    return { to: p, q: m };
+  }
+  return null;
 }
 
 /** 사람 플레이어 대신 말할 때 붙이는 안내: 직업·조사 결과는 절대 밝히지 않는다 */
@@ -46,30 +67,72 @@ export function nextTurn(s: GameState, rng = Math.random, opts: { allowHuman?: b
   const last = talk[talk.length - 1];
   const recent = talk.slice(-2).map((m) => m.from);
 
-  // 같은 두 사람이 계속 주고받고 있는지 (A,B,A 또는 A,B,A,B)
-  const froms = talk.slice(-4).map((m) => m.from);
-  const pingPong = froms.length >= 3 && froms[froms.length - 1] === froms[froms.length - 3] && froms[froms.length - 1] !== froms[froms.length - 2];
-  const loopPair = pingPong ? [froms[froms.length - 1], froms[froms.length - 2]] : [];
+  // 끝에서부터 같은 두 사람만 번갈아 말한 길이 (A,B,A,B…)
+  let pairLen = 0;
+  let pairA: number | "system" | null = null;
+  let pairB: number | "system" | null = null;
+  for (let i = talk.length - 1; i >= 0; i--) {
+    const f = talk[i].from;
+    if (pairB === null) pairB = f;
+    else if (pairA === null && f !== pairB) pairA = f;
+    else if (f !== pairA && f !== pairB) break;
+    if (i < talk.length - 1 && f === talk[i + 1].from) break;
+    pairLen++;
+  }
+  const MAX_PAIR = 8; // 둘만의 대화가 이보다 길어지면 다른 사람이 끼어들어 화제를 돌린다
+  const pingPong = pairLen >= MAX_PAIR && pairA !== null;
+  const loopPair = pingPong ? [pairA, pairB] : [];
   // 최근 대화에서 같은 사람 이야기가 계속 나오는지
   const recentTexts = talk.slice(-5).map((m) => m.text);
   const overused = s.players.find((p) => recentTexts.filter((t) => t.includes(p.name)).length >= 3);
+
+  // 둘이 대화 중이면 끝날 때까지 둔다: 직전 말이 상대를 부르거나, 상대의 말에 답하며 다시 물으면 상대가 이어서 말한다
+  if (last && !pingPong) {
+    const to = addresseeOf(s, last);
+    const repliedTo = last.replyTo !== undefined ? s.log.find((m) => m.id === last.replyTo) : undefined;
+    const partnerId = to ?? (repliedTo && repliedTo.from !== "system" && isQuestion(last.text) ? repliedTo.from : null);
+    if (partnerId !== null && partnerId !== last.from) {
+      const partner = s.players[partnerId];
+      if (partner.alive) {
+        const who = label(s, last);
+        const rule = isQuestion(last.text) ? ANSWER_RULE : "그 말에 직접, 짧게 답하세요. 더 묻고 싶은 게 있으면 그 사람에게 이어서 물어도 됩니다.";
+        const hint = `[응답] ${who}가 방금 당신에게 말했습니다: "${last.text}" ${rule}`;
+        if (!partner.isHuman) return { player: partner, reason: "addressed", replyTo: last.id, hint };
+        // 사람 플레이어에게 물었으면: 자동 대사가 남아 있으면 대신 답하고, 아니면 여기서 멈춰 직접 답하게 한다
+        if (humanOk) return { player: partner, reason: "addressed", proxy: true, replyTo: last.id, hint: proxyHint(s, hint) };
+        return null;
+      }
+    }
+  }
+
+  // 둘의 대화가 끝났는데 아직 답을 듣지 못한 질문이 있으면 그 사람이 먼저 답한다 (방금 말한 사람이 아니라면)
+  const pending = pendingQuestion(s);
+  if (pending && pending.to.id !== last?.from && !loopPair.includes(pending.to.id)) {
+    return {
+      player: pending.to,
+      reason: "addressed",
+      replyTo: pending.q.id,
+      hint: `[응답] ${label(s, pending.q)}가 당신에게 물었습니다: "${pending.q.text}" ${ANSWER_RULE}`,
+    };
+  }
 
   if (last && !pingPong) {
     const who = label(s, last);
     const to = addresseeOf(s, last);
     const addressed = to !== null ? s.players[to] : null;
+    const rule = isQuestion(last.text) ? ANSWER_RULE : "그 말에 직접, 짧게 답하세요.";
     if (addressed && addressed.alive && !addressed.isHuman && addressed.id !== last.from) {
-      return { player: addressed, reason: "addressed", hint: `[응답] ${who}가 방금 당신에게 말했습니다: "${last.text}" 그 말에 직접, 짧게 답하세요.` };
+      return { player: addressed, reason: "addressed", replyTo: last.id, hint: `[응답] ${who}가 방금 당신에게 말했습니다: "${last.text}" ${rule}` };
     }
     // 누가 나(사람 플레이어)를 부르거나 의심하면 자동으로 대신 답한다
     if (humanOk && last.from !== HUMAN_ID && (addressed?.id === HUMAN_ID || (SUSPECT_RE.test(last.text) && !TRUST_RE.test(last.text) && human.name.length >= 2 && last.text.includes(human.name)))) {
-      return { player: human, reason: "addressed", proxy: true, hint: proxyHint(s, `[응답] ${who}가 방금 당신에게 말했습니다: "${last.text}" 그 말에 직접, 짧게 답하세요.`) };
+      return { player: human, reason: "addressed", proxy: true, replyTo: last.id, hint: proxyHint(s, `[응답] ${who}가 방금 당신에게 말했습니다: "${last.text}" ${rule}`) };
     }
     // 이름이 나오면서 의심하는 말이면 그 사람이 반박
     if (SUSPECT_RE.test(last.text) && !TRUST_RE.test(last.text)) {
       const accused = alive.find((p) => p.id !== last.from && last.text.includes(p.name));
       if (accused && !recent.includes(accused.id)) {
-        return { player: accused, reason: "accused", hint: `[지목] ${who}가 방금 당신을 의심했습니다: "${last.text}" 반박하거나 해명하세요. 짧게.` };
+        return { player: accused, reason: "accused", replyTo: last.id, hint: `[지목] ${who}가 방금 당신을 의심했습니다: "${last.text}" 근거를 들어 반박하거나 해명하세요. 짧게.` };
       }
     }
   }

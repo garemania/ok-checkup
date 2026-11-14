@@ -1,6 +1,6 @@
 import { alive, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, isRepetitive, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, fabricatedAccusation, fixSelfReference, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -129,7 +129,7 @@ const RULEBOOK = `[게임 규칙 전체]
 3. 직업과 그 한계:
  - 마피아: 동료를 알고 있다. 밤마다 시민 팀 1명을 살해한다. 낮에는 시민인 척 연기하며 경찰/의사를 사칭해도 된다.
  - 경찰: 밤마다 1명을 조사해 그 사람이 "마피아인지 아닌지"만 알 수 있다. 정확한 직업(의사/군인/시민)은 알 수 없다. 대화에서 "X는 시민이다"라고 보고하면 "조사했더니 X는 마피아가 아니었다"는 뜻이다. 진짜 경찰은 단 1명이다.
- - 의사: 밤마다 1명을 보호한다(자기 자신 가능). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
+ - 의사: 밤마다 자기 자신을 제외한 1명을 보호한다(자기 자신은 보호할 수 없다). 마피아가 노린 사람과 같으면 그 사람이 죽지 않는다.
  - 군인: 마피아의 습격을 한 번 버틴다.
  - 시민: 특별한 능력이 없다.
 4. 죽음:
@@ -147,6 +147,7 @@ const RULEBOOK = `[게임 규칙 전체]
  - 의심스러운 사람은 의심해도 된다. 단, 이유(모순되는 말, 누가 누구에게 투표했는지, 이미 공개된 직업, 주장 간의 충돌)를 말한다. 믿을 때도 근거를 말한다.
  - 처형된 사람의 직업은 공개되므로 과거의 주장과 대조해 거짓말을 가려낼 수 있다.
  - 아침 안내는 누가 죽었는지만 알려준다. "밤사이 아무도 죽지 않았다"는 의사가 표적을 지켰거나 군인이 습격을 버텼다는 뜻이며, 어느 쪽인지는 아무도 모른다(마피아, 의사 본인도 모른다).
+ - 규칙을 설명하는 말("의사만 보호 능력이 있다", "경찰은 조사할 수 있다")은 직업 주장이 아니다. 그런 말을 한 사람을 "의사라고 주장했다"고 하지 않는다. 직업 주장은 자기 직업을 밝히는 말뿐이다.
  - 의사의 보호 보고는 경찰 조사가 아니다. "○○를 보호했다/살렸다"는 의사의 말이다. 그 밤 아무도 죽지 않았고 의사의 말이 사실이라면 보호받은 사람이 표적이었을 수 있고, 그렇다면 마피아가 아니다(마피아는 자기편을 습격하지 않는다). 다만 군인이 버텼을 가능성도 있어 확정은 아니다. 의사가 이를 근거로 말하는 것은 정상적인 추론이니, 의사에게 "조사를 어떻게 했냐", "경찰이냐"고 묻지 않는다.
  - 이미 나온 조사 보고(대상과 결과)를 두고 "누구를 조사했냐", "결과가 뭐냐"고 다시 묻지 않는다. 그 보고를 사실로 받아들일지 거짓으로 볼지를 판단해 반응한다.
  - "언제 조사했냐"는 따질 필요가 없다. 경찰은 매 밤 한 명씩 조사하므로 보고된 조사는 지난밤(들) 중 하나에 한 것이다. 조사 횟수가 지난 밤의 수보다 많을 때만 모순이다.
@@ -157,10 +158,13 @@ const RULEBOOK = `[게임 규칙 전체]
  - 의심할 때도 구체적인 근거(모순, 주장 충돌, 누가 누구에게 투표했는지, 공개된 직업과의 불일치)를 댄다. 근거 없는 의심을 반복하지 않는다.
  - [공개된 사실만으로 확실한 것]에 있는 추론은 사실로 받아들인다.
  - 당연한 사실(마피아는 시민 팀을 노린다, 밤에는 누군가 죽을 수 있다 등)을 새로운 발견처럼 말하지 않는다. 의미 있는 추리를 한다(예: "도윤이 어제 태오를 의심했는데 바로 당했다").
+ - 질문을 받으면 첫 문장에서 바로 답한다(예/아니오, 이유, 누구인지). 모르면 모른다고 분명히 말한다. 질문에 질문으로 답하거나 다른 사람 얘기로 넘기지 않는다. 다른 사람끼리의 질문에도 답이 안 나왔다면 대신 끼어들어 흐리지 말고 답을 기다리거나 그 질문을 정확히 짚는다.
+ - 겉도는 말("정리하자", "지켜보자", "시간만 간다")만 하지 않는다. 누구를, 왜(어떤 말·투표·주장 때문에) 의심하거나 믿는지 구체적으로 말한다.
+ - "○○가 나를 몰았다/의심했다/찍었다"처럼 과거 일을 말할 때는 실제로 있었던 일만 말한다([지금까지 일어난 일]의 의심·지목·투표 목록 기준). 없었던 일을 지어내지 않는다.
  - 같은 사람에게 같은 내용으로 다시 추궁하지 않는다. 이미 물었고 답이 나왔으면, 그 답을 평가하거나 새 근거를 대거나 다른 이야기로 넘어간다.
  - 누가 정보를 공개했다는 이유만으로 의심하지 않는다. 주장이 공개된 사실과 맞으면 일단 그럴듯하게 받아들이고, 반박할 근거(맞서는 주장, 사실과의 모순)가 있을 때만 의심한다. 말을 했다고 몰아가지 말고, 같은 사람을 근거 없이 계속 몰아붙이지 않는다.
 8. 목표와 정보: 시민 팀(경찰, 의사, 군인, 시민)은 마피아를 모두 찾아 처형해야 이긴다. 마피아는 정체를 숨기고 시민 팀을 줄여 수가 같아지면 이긴다. 다른 사람의 직업은 아무도 모른다(마피아끼리만 서로 안다). AI든 사람이든 모두 같은 조건이니, 직업을 아는 척하지 말고 대화와 사실로 추리한다.
-9. 투표: 확실히 의심 가는 사람이 없으면 기권해도 된다. 근거 없이 아무나 찍지 않는다. 의심 가는 사람이 있으면 그 이유를 바탕으로 투표한다.
+9. 투표: 조금이라도(10% 정도라도) 의심 가는 사람이 있으면 그중 가장 의심되는 사람에게 투표한다. 정말 아무 단서가 없을 때만 기권한다.
 7. 추리하며 말하기: [당신의 추리 메모]와 [공개된 사실만으로 확실한 것]을 근거로, 지금 진행 상황(며칠째, 누가 죽었고 누가 무엇을 주장했는지)에 맞춰 추리를 드러내며 말한다. 예: "어젯밤 의사가 살린 사람이 서연이라면 서연은 표적이었으니 마피아는 아니겠네", "경찰 주장이 둘이니 한 명은 가짜다". 단, 당신만 아는 비공개 정보(직업, 조사 결과, 동료)를 밝힐지는 전략적으로 판단한다.
  - 마피아라면 겉으로는 이 원칙을 따르는 척하며 시민 팀의 신뢰를 얻는다.`;
 
@@ -219,15 +223,13 @@ ${privateKnowledge(s, p)}
 
 function stateBlock(s: GameState, p: Player): string {
   const living = alive(s).map((x) => `${x.id}:${x.name}`).join(", ");
-  const w = (s.whispers[p.id] ?? []).map((m) => `${m.from === HUMAN_ID ? `플레이어(${s.players[HUMAN_ID].name})` : `${p.name}(당신)`}: ${m.text}`).join("\n");
   return `[현재] ${s.day}일차 (${s.phase === "night" ? "밤" : s.phase === "vote" ? "투표" : s.phase === "trial" ? "재판" : "낮"})
 생존자(id:이름, 투표·지목은 이 중에서만): ${living}
 [지금까지 일어난 일]
 ${factsBlock(s)}
 [지금까지 오간 대화] (최근 순서대로, "(당신)"이 붙은 줄이 당신의 발언)
 ${transcriptFor(s, p) || "(아직 없음)"}
-${focusBlock(s, p)}
-${w ? `[플레이어(${s.players[HUMAN_ID].name})와 나눈 1:1 비밀 대화]\n${w}` : ""}`;
+${focusBlock(s, p)}`;
 }
 
 const clean = (t: string, name: string) =>
@@ -268,10 +270,10 @@ async function askTarget(settings: Settings, s: GameState, p: Player, cands: num
   const shape = key === "vote" ? `{"vote": <후보의 id 숫자 또는 null>, "confidence": <0~100>, "reason": "짧은 이유"}` : `{"${key}": <후보의 id 숫자>, "reason": "짧은 이유"}`;
   const prompt = `${stateBlock(s, p)}\n\n${task}\n후보(id:이름): ${list}\n반드시 JSON 한 줄만 출력: ${shape}`;
   const first = await callLLM(settings, systemPrompt(s, p), prompt, 200);
-  // 투표는 확신이 낮으면(60 미만) 기권으로 본다
+  // 투표는 확신이 10 미만(사실상 단서 없음)일 때만 기권으로 본다
   if (key === "vote") {
     const conf = first.match(/"confidence"\s*:\s*(\d+)/);
-    if (conf && Number(conf[1]) < 60) return null;
+    if (conf && Number(conf[1]) < 10) return null;
   }
   const r1 = parseTarget(first, cands, names);
   if (r1 !== undefined) return r1;
@@ -289,7 +291,6 @@ export interface AI {
   speak(s: GameState, p: Player, hint?: string): Promise<Spoken>;
   vote(s: GameState, p: Player): Promise<number | null>;
   nightTarget(s: GameState, p: Player, kind: "kill" | "protect" | "investigate"): Promise<number>;
-  whisper(s: GameState, p: Player, userText: string): Promise<Spoken>;
   /** 사람 플레이어의 자유 발언을 직업 주장/조사 보고로 해석 (실패하면 null) */
   interpret(s: GameState, text: string): Promise<Meaning | null>;
   /** 최후 찬반 투표: true = 처형에 찬성 */
@@ -306,6 +307,12 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
     if (speaksOfSelf(text, p.name)) out.push(`당신 자신(${p.name})을 이름으로 불렀습니다. 당신은 ${p.name}입니다. 자신은 "저/나"로 말하세요.`);
     const dead = addressesDead(s, text, p.id);
     out.push(...ruleViolations(text));
+    const fake = fabricatedAccusation(s, p.id, text);
+    if (fake !== null) out.push(`${s.players[fake].name}이(가) 당신을 의심하거나 지목하거나 투표한 적은 실제로 없습니다. 있지도 않은 일을 말하지 마세요. [지금까지 일어난 일]의 "누가 누구를 의심·지목·투표했는지"에 있는 것만 말하세요.`);
+    const asked = task.match(/\[응답\][^"]*"([^"]+)"/)?.[1];
+    if (asked && /\?|왜|누구|뭐|무슨|어떻게|는지|나요|까요/.test(asked) && isEvasive(s, p.id, asked, text))
+      out.push(`질문("${asked}")에 답하지 않았습니다. 첫 문장에서 바로 답하세요(예/아니오, 이유, 누구인지). 모르면 모른다고 하세요. 되묻거나 다른 사람 얘기로 넘기지 마세요.`);
+    if (isVague(s, p.id, text)) out.push("말이 겉돕니다. \"정리하자/지켜보자\" 대신 누구를 왜(어떤 말·투표·주장 때문에) 의심하거나 믿는지 구체적으로 말하세요.");
     if (repeatsQuestion(s, p.id, text)) out.push("오늘 이미 같은 사람에게 비슷한 내용으로 묻거나 추궁했습니다. 같은 걸로 다시 추궁하지 말고, 새 근거를 대거나 다른 이야기로 넘어가세요.");
     if (isRepetitive(s, p.id, text)) out.push("방금 나온 말(또는 당신이 최근에 한 말)과 거의 같습니다. 같은 얘기를 되풀이하지 말고 새로운 근거, 다른 사람, 다른 쟁점, 또는 결론을 말하세요.");
     if (dead !== null) out.push(`${s.players[dead].name}은(는) 이미 사망해서 말도 대답도 할 수 없습니다. 죽은 사람에게 묻거나 대답을 요구하지 말고 살아 있는 사람에게 말하세요. (생전의 발언을 근거로 언급하는 것은 괜찮습니다.)`);
@@ -316,6 +323,10 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
   if (issues.length) {
     const again = await callLLM(settings, systemPrompt(s, p), `${prompt}\n\n[다시 쓰기] 방금 쓴 답변 "${spoken.text}"에는 문제가 있습니다:\n- ${issues.join("\n- ")}\n직전 발언과 [지금까지 일어난 일]에 맞게 다시 쓰세요.`, 200);
     spoken = parseSpoken(clean(again, p.name));
+  }
+  // 다시 써도 자기 이름으로 자기를 부르면 1인칭으로 직접 바꾼다
+  if (speaksOfSelf(spoken.text, p.name)) {
+    spoken = { ...spoken, text: fixSelfReference(spoken.text, p.name, /(반말|털털|가벼운|단호|평어)/.test(p.speech)) };
   }
   return spoken;
 }
@@ -341,11 +352,11 @@ ${EMOTION_RULE}`;
     vote: (s, p) =>
       safe(async () => {
         const cands = alive(s).filter((x) => x.id !== p.id).map((x) => x.id);
-        return askTarget(settings, s, p, cands, "투표 시간입니다. 기본은 기권(vote에 null)입니다. 마피아라고 볼 분명한 근거(반박 없는 경찰 보고, 드러난 거짓말·모순, 공개된 사실과 맞지 않는 주장)가 있을 때만 그 사람을 고르세요. 누군지 잘 모르겠으면 반드시 기권하세요. confidence(0~100)에 확신 정도를 적으세요.", "vote");
+        return askTarget(settings, s, p, cands, "투표 시간입니다. 조금이라도(10% 정도라도) 마피아 같다는 느낌이 드는 사람이 있으면 그중 가장 의심되는 사람에게 투표하세요. 정말 아무 단서도 없을 때만 기권(vote에 null)하세요. confidence(0~100)에 확신 정도를 적으세요.", "vote");
       }, () => mock.vote(s, p)),
     nightTarget: (s, p, kind) =>
       safe(async () => {
-        const cands = alive(s).filter((x) => (kind === "protect" ? true : x.id !== p.id) && !(kind === "kill" && x.role === "mafia")).map((x) => x.id);
+        const cands = alive(s).filter((x) => x.id !== p.id && !(kind === "kill" && x.role === "mafia")).map((x) => x.id);
         const verb = { kill: "살해할", protect: "보호할", investigate: "조사할" }[kind];
         const r = await askTarget(settings, s, p, cands, `밤입니다. ${verb} 사람을 고르세요.`, "target");
         if (r === null) throw new Error("target parse: null");
@@ -361,7 +372,8 @@ ${EMOTION_RULE}`;
 - 조사 보고: 누군가를 조사했더니 마피아다/마피아가 아니다(시민이다)라는 말. 예: "서연 조사했는데 마피아임" -> 서연=mafia, "조사해보니 도윤 시민" -> 도윤=clean, "하은은 마피아 아님" -> 하은=clean.
 - 이전 기록에서 이미 경찰을 주장한 사람이 "X 마피아야"라고 말하면 조사 보고로 봅니다.
 - 의사 보호 보고: "X를 보호했다/살렸다/지켰다"는 의사의 말이며 경찰 조사가 아닙니다. 이 경우 saves에 넣고 reports에는 넣지 마세요. 의사가 "보호했는데 마피아 아닌 걸 알았다"고 하면 saves로 봅니다.
-- 해당 내용이 없으면 claim은 null, reports는 빈 배열입니다. 추측으로 만들어 내지 마세요.`;
+- 규칙이나 일반적인 이야기(예: "의사만 보호 능력이 있다", "경찰은 조사할 수 있다", "원래 의사가 지킨다")는 직업 주장도 보고도 아닙니다. claim은 자기 직업을 밝히는 말("나 의사야", "저 경찰이에요")일 때만, saves/reports는 본인이 실제로 한 행동("보호했다", "조사해 보니")일 때만 넣으세요.
+- 해당 내용이 없으면 claim은 null, reports와 saves는 빈 배열입니다. 추측으로 만들어 내지 마세요.`;
         const user = `[이전 기록]\n${transcriptFor(s, me, 20)}\n\n[해석할 플레이어 발언] "${text}"\n[후보(id:이름)] ${names}\nJSON 한 줄만 출력: {"claim": null 또는 "경찰"|"의사"|"군인"|"마피아"|"시민", "reports": [{"target": id, "result": "mafia" 또는 "clean"}], "saves": [{"target": id}], "summary": "한 줄 해석"}`;
         const t = await callLLM(settings, sys, user, 300);
         const m = t.match(/\{[\s\S]*\}/);
@@ -392,14 +404,6 @@ ${EMOTION_RULE}`;
         if (!m) throw new Error(`verdict parse: ${t.slice(0, 120) || "(빈 응답)"}`);
         return m[1].toLowerCase() === "true";
       }, () => mock.verdict(s, p, accused)),
-    whisper: (s, p, userText) =>
-      safe(async () => {
-        const night = s.phase === "night";
-        const task = `${s.players[HUMAN_ID].name}가 당신에게 1:1 비밀 대화로 말했습니다: "${userText}"
-${night ? "지금은 밤이고 마피아끼리의 비밀 대화입니다. 오늘 밤 누구를 노릴지 의견을 나누세요.\n" : ""}당신의 캐릭터와 직업/전략에 맞게 1~2문장으로 답하세요. (거짓말·떠보기 가능) 답변 내용만 출력.
-${EMOTION_RULE}`;
-        return askSpoken(settings, s, p, task);
-      }, () => mock.whisper(s, p, userText)),
   };
 }
 
@@ -594,8 +598,8 @@ function makeMockAI(): AI {
         if (taeo) return taeoLine("police", tn, nameOf(s, rec[0].target));
         return `제가 경찰입니다. 조사해보니 ${nameOf(s, rec[0].target)}님이 마피아예요. 오늘 투표는 그분으로 갑시다.`;
       }
-      if (taeo && accusedMe) return taeoLine("accused", tn);
-      if (accusedMe) return pick(formal
+      if (taeo && accusedMe && !hint?.startsWith("[응답]")) return taeoLine("accused", tn);
+      if (accusedMe && !hint?.startsWith("[응답]")) return pick(formal
         ? ["저를 의심하시는 건 근거가 부족해 보여요. 오히려 제가 보기엔 " + tn + "님이 수상합니다.", "억울하네요. 저는 시민입니다. 차라리 " + tn + "님을 보세요.", "제 어느 말이 수상했는지 짚어 주세요. 해명할게요.", "저를 몰아가는 흐름이 오히려 이상해요. " + tn + "님은 왜 조용하시죠?"]
         : ["나 의심하는 건 좀 억울한데? 난 " + tn + " 쪽이 더 수상해.", "어허, 날 몰아가지 마. " + tn + " 좀 봐.", "내 말 중에 뭐가 걸렸는지 말해 봐. 해명할게.", "날 몰아가는 게 더 수상하다. " + tn + "는 왜 조용해?"]);
       if (hint?.startsWith("[시작]")) {
@@ -608,6 +612,11 @@ function makeMockAI(): AI {
       }
       if (hint?.startsWith("[응답]")) {
         const q = hint.match(/"([^"]*)"/)?.[1] ?? "";
+        // 질문이면 첫 문장에서 바로 답한다 (질문에 나온 사람이 있으면 그 사람을 두고 답한다)
+        const named = s.players.find((x) => x.id !== p.id && x.id !== HUMAN_ID && q.includes(x.name))?.name ?? tn;
+        if (/왜/.test(q)) return pick(formal ? [`그건 ${named}님 말이 계속 바뀌어서예요.`, `이유는 어제 투표예요. ${named}님이 근거 없이 표를 옮겼거든요.`] : [`그건 ${named} 말이 자꾸 바뀌어서야.`, `이유는 어제 투표야. ${named}가 근거 없이 표를 옮겼거든.`]);
+        if (/누구|누굴/.test(q)) return pick(formal ? [`${tn}님이요. 말이 제일 겉돌았거든요.`, `저는 ${tn}님을 봐요. 어제 투표가 이상했어요.`] : [`${tn}. 말이 제일 겉돌았거든.`, `난 ${tn}를 봐. 어제 투표가 이상했어.`]);
+        if (/근거|이유/.test(q)) return pick(formal ? [`근거는 어제 투표예요. ${named}님이 이유 없이 표를 옮겼어요.`, `솔직히 확실한 근거는 없어요. 느낌이 컸어요.`] : [`근거는 어제 투표야. ${named}가 이유 없이 표를 옮겼어.`, `솔직히 확실한 근거는 없어. 느낌이 컸어.`]);
         if (/(의심|수상|마피아|거짓|가짜)/.test(q)) return pick(formal ? ["저를 왜 그렇게 보세요? 근거를 말씀해 주시면 해명할게요.", "저는 아니에요. 그렇게 보신 이유가 궁금하네요."] : ["나를 왜 그렇게 봐? 근거를 대 봐.", "난 아니야. 왜 그렇게 생각했는데?"]);
         if (/\?|요\?|까\?/.test(q)) return pick(formal ? ["음, 저는 아직 확신은 없어요. 조금 더 지켜보려고요.", "좋은 질문이네요. 저는 투표 흐름을 보고 있어요."] : ["음, 아직 확신은 없어. 좀 더 보자.", "글쎄, 난 투표 흐름을 보고 있어."]);
         return pick(formal ? ["네, 저도 그렇게 생각해요.", "그 말 일리 있네요."] : ["ㅇㅇ 나도 그렇게 봐.", "그 말 일리 있네."]);
@@ -648,8 +657,9 @@ function makeMockAI(): AI {
       await wait(150 + Math.random() * 250);
       const sc = suspicion(s, p);
       const t = top(sc);
-      // 누군지 모르면 기권: 기본 점수는 0~2의 무작위이므로, 지목·조사 보고 같은 실제 근거로 점수가 2.4 이상 올라간 사람에게만 투표한다
-      if (t === null || sc[t] < 2.4) return p.role === "mafia" && t !== null && Math.random() < 0.3 ? t : null;
+      // 조금이라도 의심이 가면 투표한다. 가장 의심되는 사람의 점수가 아주 낮을 때(단서가 거의 없을 때)만 기권
+      if (t === null) return null;
+      if (p.role !== "mafia" && sc[t] < 1.4) return null;
       return t;
     },
     async nightTarget(s, p, kind) {
@@ -661,8 +671,10 @@ function makeMockAI(): AI {
         return (claimers.length ? pick(claimers) : pick(t)).id;
       }
       if (kind === "protect") {
-        const claimers = pool.filter((x) => s.log.some((m) => m.from === x.id && /제가 경찰/.test(m.text)));
-        return (claimers.length ? pick(claimers) : Math.random() < 0.3 ? p : pick(pool.filter((x) => x.id !== p.id))).id;
+        // 의사는 자기 자신을 보호할 수 없다
+        const others = pool.filter((x) => x.id !== p.id);
+        const claimers = others.filter((x) => s.log.some((m) => m.from === x.id && /제가 경찰/.test(m.text)));
+        return (claimers.length ? pick(claimers) : pick(others)).id;
       }
       const done = (s.policeLog[p.id] ?? []).map((r) => r.target);
       const t = pool.filter((x) => x.id !== p.id && !done.includes(x.id));
@@ -680,19 +692,6 @@ function makeMockAI(): AI {
       // 확신이 없으면 처형에 반대한다 (근거가 있는 경우에만 찬성)
       return (top(sc) === accused && (sc[accused] ?? 0) >= 2.4) || (sc[accused] ?? 0) > 2.8 || Math.random() < 0.15;
     },
-    async whisper(s, p, userText) {
-      await wait(500 + Math.random() * 500);
-      const sc = suspicion(s, p);
-      const tn = top(sc);
-      const name = tn !== null ? nameOf(s, tn) : "누군가";
-      if (s.phase === "night" && p.role === "mafia") return `오늘 밤은 ${name}를 노리는 게 어때? 눈에 띄게 의심받고 있잖아.`;
-      if (/(마피아|경찰|의사|직업|정체)/.test(userText)) {
-        return p.role === "mafia" && Math.random() < 0.6
-          ? "나? 당연히 시민이지. 믿어줘. 오히려 내가 보기엔 " + name + " 쪽이 수상해."
-          : pick(["그건 아직 밝히기 곤란해. 일단 네 생각부터 말해줘.", "직업은 지금 말하긴 좀 위험하잖아. 토론에서 보자.", "나는 시민 쪽이라고 믿어줘. " + name + "을(를) 같이 지켜보자."]);
-      }
-      return pick([`음, 나는 ${name}이(가) 좀 신경 쓰여. 너는 어때?`, "좋은 생각이야. 토론에서 같이 밀어보자.", "일단 투표 전까지 더 지켜보자. 너무 서두르면 위험해."]);
-    },
   };
   // 오프라인 AI도 대사 내용에 맞춰 표정을 붙인다
   return {
@@ -706,10 +705,6 @@ function makeMockAI(): AI {
     nightTarget: raw.nightTarget,
     verdict: raw.verdict,
     interpret: async () => null, // 오프라인에서는 규칙 기반 해석만 사용
-    whisper: async (s, p, t) => {
-      const text = await raw.whisper(s, p, t);
-      return { text, emotion: detectEmotion(text) };
-    },
   };
 }
 

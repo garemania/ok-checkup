@@ -38,6 +38,7 @@ export interface ChatMsg {
   emotion?: Emotion;
   meaning?: Meaning; // 발언의 구조적 해석 (직업 주장, 조사 보고)
   auto?: boolean; // 플레이어 대신 자동으로 한 말
+  replyTo?: number; // 이 말이 답하고 있는 메시지 id (화면에 원래 질문을 인용)
 }
 
 export interface Meaning {
@@ -45,14 +46,6 @@ export interface Meaning {
   reports?: { target: number; result: "clean" | "mafia" }[];
   saves?: { target: number }[]; // 의사의 보호 보고 ("○○를 지켰다/살렸다")
   summary?: string;
-}
-
-export interface WhisperMsg {
-  id: number;
-  day: number;
-  from: number; // 발신자 id
-  text: string;
-  emotion?: Emotion;
 }
 
 export interface Investigation {
@@ -67,8 +60,6 @@ export interface GameState {
   round: number; // 오늘 진행된 토론 라운드
   players: Player[];
   log: ChatMsg[];
-  whispers: Record<number, WhisperMsg[]>; // key: AI id (나와의 1:1)
-  whispersUsed: number;
   investigations: Investigation[]; // 경찰(누구든) 조사 기록: actor 별로 분리
   policeLog: Record<number, Investigation[]>;
   doctorLog: Record<number, { day: number; target: number; quiet: boolean }[]>; // 의사별 보호 기록 (quiet: 그 밤 아무도 죽지 않음. 의사가 막았는지 군인이 버텼는지는 의사도 모른다)
@@ -108,7 +99,19 @@ export const ROLE_LABEL: Record<Role, string> = {
 export const ROLE_DESC: Record<Role, string> = {
   mafia: "밤마다 동료와 함께 한 명을 제거합니다. 정체를 숨기고 시민을 속이세요.",
   police: "밤마다 한 명을 조사해 마피아인지 알아낼 수 있습니다.",
-  doctor: "밤마다 한 명을 지목해 마피아의 공격으로부터 보호합니다.",
+  doctor: "밤마다 자신을 제외한 한 명을 지목해 마피아의 공격으로부터 보호합니다.",
   soldier: "마피아의 습격을 한 번 버텨냅니다. 능력은 자동으로 발동합니다.",
   citizen: "특별한 능력은 없지만 토론과 투표로 마피아를 찾아내야 합니다.",
+};
+
+/** 직업 추정 메모의 순서 (누를 때마다 다음으로) */
+export const GUESS_ORDER: (Role | null)[] = [null, "mafia", "police", "doctor", "soldier", "citizen"];
+
+/** 직업별 색 (추정 칩) */
+export const ROLE_TONE: Record<Role, string> = {
+  mafia: "border-red-500/70 bg-red-500/20 text-red-300",
+  police: "border-sky-500/70 bg-sky-500/20 text-sky-300",
+  doctor: "border-emerald-500/70 bg-emerald-500/20 text-emerald-300",
+  soldier: "border-amber-500/70 bg-amber-500/20 text-amber-300",
+  citizen: "border-zinc-400/60 bg-zinc-500/20 text-zinc-200",
 };

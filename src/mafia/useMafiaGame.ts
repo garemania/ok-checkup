@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
 import { nextTurn, openerTurn } from "./director";
-import { AUTO_ADVANCE_MS, HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, MAX_WHISPERS_PER_DAY, WATCH_LINES } from "./data";
-import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman } from "./context";
+import { AUTO_ADVANCE_MS, HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, WATCH_LINES } from "./data";
+import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman, sanitizeMeaning } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
-import { ROLE_LABEL } from "./types";
+import { GUESS_ORDER, ROLE_LABEL } from "./types";
 import type { Emotion, GameState, Meaning, Player, Role, Settings } from "./types";
 
 const SETTINGS_KEY = "mafia-settings";
@@ -41,9 +41,14 @@ export function useMafiaGame(onError: (msg: string) => void) {
   const [state, setState] = useState<GameState | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
-  const [typing, setTyping] = useState<number | null>(null); // 1:1 답장 작성 중인 AI
   const [errors, setErrors] = useState<string[]>([]); // 최근 API 오류 (설정 화면에서 확인/복사)
-  const [unread, setUnread] = useState<Record<number, boolean>>({});
+  // 내 직업 추정 메모 (AI에게 전달되지 않음, 새 게임마다 초기화)
+  const [guesses, setGuesses] = useState<Record<number, Role | null>>({});
+  const cycleGuess = (id: number) =>
+    setGuesses((g) => {
+      const i = GUESS_ORDER.indexOf(g[id] ?? null);
+      return { ...g, [id]: GUESS_ORDER[(i + 1) % GUESS_ORDER.length] };
+    });
   const ref = useRef<GameState | null>(null);
   const runId = useRef(0);
   // 대사를 한 줄씩 보여주고 사용자가 "다음"을 눌러야 넘어가게 하는 장치
@@ -130,8 +135,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setState(ref.current);
     setBusy(false);
     setSpeaking(null);
-    setTyping(null);
-    setUnread({});
+    setGuesses({});
     commit((s) => addMsg(s, "system", "1일차 밤이 되었습니다. 마을에 어둠이 내립니다. 첫 밤에는 마피아의 살해만 없고, 경찰 조사 같은 능력은 정상적으로 사용할 수 있습니다.", "night"));
   };
 
@@ -264,10 +268,9 @@ export function useMafiaGame(onError: (msg: string) => void) {
       setSpeaking(null);
       commit((x) => {
         const next = addMsg(x, turn.player.id, said.text, undefined, said.emotion);
-        if (!turn.proxy) return next;
         const log = next.log.slice();
-        log[log.length - 1] = { ...log[log.length - 1], auto: true };
-        return { ...next, log, autoUsed: x.autoUsed + 1 };
+        log[log.length - 1] = { ...log[log.length - 1], ...(turn.proxy ? { auto: true } : {}), ...(turn.replyTo !== undefined ? { replyTo: turn.replyTo } : {}) };
+        return { ...next, log, autoUsed: turn.proxy ? x.autoUsed + 1 : x.autoUsed };
       });
       if (i < lines - 1) {
         await waitLine();
@@ -298,16 +301,22 @@ export function useMafiaGame(onError: (msg: string) => void) {
 
 
   /** 지정한 캐릭터들이 한 줄씩 말한다 (마지막 줄 전까지는 "다음"을 기다린다). 중단되면 false */
-  const respond = async (id: number, items: { player: Player; hint: string }[]): Promise<boolean> => {
+  const respond = async (id: number, items: { player: Player; hint: string; replyTo?: number }[]): Promise<boolean> => {
     const engine = ai();
     for (let i = 0; i < items.length; i++) {
-      const { player, hint } = items[i];
+      const { player, hint, replyTo } = items[i];
       if (!alivePhaseGuard(id)) return false;
       setSpeaking(player.id);
       const said = await engine.speak(ref.current!, ref.current!.players[player.id], hint);
       if (!alivePhaseGuard(id)) return false;
       setSpeaking(null);
-      commit((x) => addMsg(x, player.id, said.text, undefined, said.emotion));
+      commit((x) => {
+        const next = addMsg(x, player.id, said.text, undefined, said.emotion);
+        if (replyTo === undefined) return next;
+        const log = next.log.slice();
+        log[log.length - 1] = { ...log[log.length - 1], replyTo };
+        return { ...next, log };
+      });
       if (i < items.length - 1) {
         await waitLine();
         if (!alivePhaseGuard(id)) return false;
@@ -367,11 +376,12 @@ export function useMafiaGame(onError: (msg: string) => void) {
     commit((x) => addMsg(x, HUMAN_ID, text.trim()));
     const msgId = ref.current!.nextMsgId - 1;
     // 자유 발언을 직업 주장/조사 보고로 해석해 둔다 (API: LLM 해석, 실패 또는 오프라인: 규칙 기반)
-    const llmMeaning = await ai().interpret(ref.current!, text.trim());
+    const llmRaw = await ai().interpret(ref.current!, text.trim());
+    const llmMeaning = llmRaw ? sanitizeMeaning(normalizeHuman(text, ref.current!.players).text, llmRaw) : null;
     if (!alivePhaseGuard(id)) return false;
     const wasPolice = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) })[HUMAN_ID] === "police";
     const prevClaims = detectClaims({ ...ref.current!, log: ref.current!.log.filter((m) => m.id !== msgId) });
-    const meaning = llmMeaning ?? interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice, prevClaims[HUMAN_ID] === "doctor");
+    const meaning = llmMeaning ?? sanitizeMeaning(normalizeHuman(text, ref.current!.players).text, interpretByRules(text.trim(), ref.current!.players, HUMAN_ID, wasPolice, prevClaims[HUMAN_ID] === "doctor"));
     if (llmMeaning) setMeaning(msgId, llmMeaning);
     const cur = ref.current!;
     const me0 = cur.players[HUMAN_ID].name;
@@ -395,6 +405,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
         hint: `플레이어(${me0})가 방금 발언했습니다.${meaning.summary ? ` (발언 해석: ${meaning.summary})` : ""} ${mentioned.includes(p) ? "당신이 직접 언급되었으니 응답하세요." : "자연스럽게 반응하거나 의견을 덧붙이세요."}`,
       }));
     }
+    // 첫 반응은 플레이어의 말에 대한 답이므로 원래 말을 인용해 보여준다
+    if (items[0]) items[0] = { ...items[0], replyTo: msgId } as (typeof items)[number];
     return respond(id, items);
   };
 
@@ -479,7 +491,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
   };
 
   const goNight = () =>
-    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, whispersUsed: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
+    commit((x) => addMsg({ ...x, phase: "night", day: x.day + 1, round: 0, votes: {}, accused: null, trialStage: null, actionsUsed: 0, autoUsed: 0 }, "system", `${x.day + 1}일차 밤이 되었습니다.`, "night"));
 
   /** 최후의 변론 -> 찬반 투표 -> (처형 시) 유언. 중단되면 false */
   const runTrial = async (id: number, accusedId: number): Promise<boolean> => {
@@ -579,48 +591,13 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setBusy(false);
   };
 
-  /* ---------------- 1:1 대화 ---------------- */
-  const whisperBlockReason = (targetId: number): string | null => {
-    const s = ref.current;
-    if (!s) return "게임 중이 아닙니다.";
-    const t = s.players[targetId];
-    if (!s.players[HUMAN_ID].alive) return "사망하여 대화할 수 없습니다.";
-    if (!t.alive) return "이미 사망한 캐릭터입니다.";
-    if (s.phase === "night" && !(s.players[HUMAN_ID].role === "mafia" && t.role === "mafia")) return "밤에는 마피아 동료끼리만 대화할 수 있습니다.";
-    if (s.phase === "gameover") return "게임이 끝났습니다.";
-    if (s.whispersUsed >= MAX_WHISPERS_PER_DAY) return `하루 1:1 대화 횟수(${MAX_WHISPERS_PER_DAY}회)를 모두 사용했습니다.`;
-    return null;
-  };
-
-  const sendWhisper = async (targetId: number, text: string) => {
-    if (!text.trim() || whisperBlockReason(targetId) || typing !== null) return;
-    const id = runId.current;
-    const wmsg = (from: number, t: string, emotion?: Emotion) => (x: GameState): GameState => ({
-      ...x,
-      whispers: { ...x.whispers, [targetId]: [...(x.whispers[targetId] ?? []), { id: x.nextMsgId, day: x.day, from, text: t, emotion }] },
-      nextMsgId: x.nextMsgId + 1,
-    });
-    commit(wmsg(HUMAN_ID, text.trim()));
-    commit((x) => ({ ...x, whispersUsed: x.whispersUsed + 1 }));
-    setTyping(targetId);
-    const engine = ai();
-    const s = ref.current!;
-    const reply = await engine.whisper(s, s.players[targetId], text.trim());
-    if (!alivePhaseGuard(id)) return;
-    commit(wmsg(targetId, reply.text, reply.emotion));
-    setTyping(null);
-    setUnread((u) => ({ ...u, [targetId]: true }));
-  };
-
-  const clearUnread = (id: number) => setUnread((u) => ({ ...u, [id]: false }));
-
   const helpers = {
     human: state ? me(state) : null,
     partners: state ? mafiaPartners(state, HUMAN_ID) : [],
   };
 
   return {
-    waiting, advance, watching, runWatch, stopWatch, toggleAutoAdvance: () => {
+    guesses, cycleGuess, waiting, advance, watching, runWatch, stopWatch, toggleAutoAdvance: () => {
       const on = !settingsRef.current.autoAdvance;
       setSettings({ ...settingsRef.current, autoAdvance: on });
       settingsRef.current = { ...settingsRef.current, autoAdvance: on };
@@ -636,8 +613,8 @@ export function useMafiaGame(onError: (msg: string) => void) {
         clearTimeout(autoTimer.current); // 끄면 자동 타이머를 멈추고 "다음"을 기다린다
         autoTimer.current = null;
       }
-    }, awaitingHuman, submitDefense: (t: string | null) => resolveHuman(t), submitVerdict: (v: boolean) => resolveHuman(v), doAction, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking, typing, unread, clearUnread,
+    }, awaitingHuman, submitDefense: (t: string | null) => resolveHuman(t), submitVerdict: (v: boolean) => resolveHuman(v), doAction, settings, setSettings, errors, clearErrors: () => setErrors([]), state, busy, speaking,
     startGame, quit, runNight, runRound, sendPublic, startVote, runVote,
-    sendWhisper, whisperBlockReason, ...helpers,
+    ...helpers,
   };
 }

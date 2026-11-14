@@ -115,7 +115,28 @@ function verdictOf(window: string): "clean" | "mafia" | null {
  * "서연 조사했는데 마피아임", "조사해보니 서연 마피아", "서연=시민"처럼 자유로운 표현도 인식한다.
  * isPoliceClaimer: 이 화자가 이전에 이미 경찰을 주장했는지
  */
-const SAVE_CUE = /(보호|살렸|살려|지켰|지켜|치료)/;
+// 실제로 한 보호 행동 (과거형). "보호 능력", "보호할 수 있다" 같은 일반론은 해당하지 않는다
+const SAVE_CUE = /(보호했|보호함|보호해\s*줬|보호해\s*줌|살렸|살림|살려\s*줬|지켰|지킴|지켜\s*줬|치료했)/;
+
+const FIRST_PERSON_RE = /(?:^|[\s,.])(?:저|제가|저는|전|나|내가|난|나는)(?=[\s,.]|$)|(?:제가|내가)/;
+// 규칙·일반론: "의사만 보호 능력이 있다", "경찰은 조사할 수 있다", "원래 의사가 지킨다"
+const GENERIC_RE = /(능력|할\s*수\s*있|할\s*수\s*없|가능하|가능해|규칙|원래|만이|[가-힣]만\s|하는\s*거|하는\s*게|해야\s*(?:해|돼|한다))/;
+
+/**
+ * 해석 결과 정리: 규칙이나 일반론을 말한 것이면 직업 주장·보고로 보지 않는다.
+ * 자기 직업을 밝히는 말(나/저 + 직업)과 본인이 실제로 한 행동만 남긴다. (LLM 해석 결과에도 적용)
+ */
+export function sanitizeMeaning(text: string, meaning: Meaning): Meaning {
+  const firstPerson = FIRST_PERSON_RE.test(text);
+  const generic = GENERIC_RE.test(text);
+  const out: Meaning = { ...meaning };
+  if (out.claim && generic && !firstPerson) out.claim = undefined;
+  if (out.claim && !CLAIM_RE.test(text) && !new RegExp(`${ROLE_LABEL[out.claim]}\\s*(?:예요|이에요|입니다|이야|야|임|이다)`).test(text) && !firstPerson) out.claim = undefined;
+  if (out.saves && !SAVE_CUE.test(text)) out.saves = undefined;
+  if (out.reports && generic && !firstPerson && !/(조사해\s*보니|조사했|조사\s*결과)/.test(text)) out.reports = undefined;
+  if (out.summary && !out.claim && !out.saves && !out.reports) out.summary = undefined;
+  return out;
+}
 
 export function interpretByRules(text: string, players: Player[], speaker: number, isPoliceClaimer = false, isDoctorClaimer = false): Meaning {
   const norm = normalizeHuman(text, players).text;
@@ -129,7 +150,7 @@ export function interpretByRules(text: string, players: Player[], speaker: numbe
 
   // 의사의 보호 보고: "○○ 보호했어", "○○ 살렸다" -> 경찰 조사로 보지 않는다
   const saves: NonNullable<Meaning["saves"]> = [];
-  const doctorTalk = claim === "doctor" || isDoctorClaimer || (SAVE_CUE.test(norm) && /의사/.test(norm));
+  const doctorTalk = claim === "doctor" || isDoctorClaimer || (SAVE_CUE.test(norm) && /의사/.test(norm) && FIRST_PERSON_RE.test(norm));
   if (SAVE_CUE.test(norm) && (doctorTalk || claim !== "police")) {
     found.forEach(({ q, at }, i) => {
       const end = i + 1 < found.length ? found[i + 1].at : norm.length;
@@ -171,7 +192,8 @@ function meaningsInOrder(s: GameState): { m: ChatMsg; meaning: Meaning }[] {
   const out: { m: ChatMsg; meaning: Meaning }[] = [];
   for (const m of s.log) {
     if (m.from === "system") continue;
-    const meaning = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from), doctorClaimers.has(m.from));
+    const raw = m.meaning ?? interpretByRules(m.text, s.players, m.from, policeClaimers.has(m.from), doctorClaimers.has(m.from));
+    const meaning = sanitizeMeaning(normalizeHuman(m.text, s.players).text, raw);
     if (meaning.claim === "police") policeClaimers.add(m.from);
     if (meaning.claim === "doctor") doctorClaimers.add(m.from);
     out.push({ m, meaning });
@@ -267,6 +289,13 @@ export function factsBlock(s: GameState): string {
       lines.push(`${m.day}일차 찬반: ${tail}`);
     }
   }
+
+  const pairs = accusationPairs(s);
+  if (pairs.length) {
+    const seen = new Set<string>();
+    const items = pairs.filter((x) => { const k = `${x.by}-${x.target}-${x.day}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(-14);
+    lines.push(`누가 누구를 의심·지목·투표했는지(실제로 있었던 것만): ${items.map((x) => `${s.players[x.by].name}→${s.players[x.target].name}(${x.day}일차)`).join(", ")}`);
+  } else lines.push("누가 누구를 의심·지목·투표했는지: 아직 없음");
 
   const ded = deductions(s);
   if (ded.length) lines.push(`[공개된 사실만으로 확실한 것]\n- ${ded.join("\n- ")}`);
@@ -366,7 +395,9 @@ export function addresseeOf(s: GameState, m: ChatMsg): number | null {
 /** 자기 자신을 이름(3인칭)으로 부르는 어색한 문장인지 검사. "저 서연은 ..."처럼 1인칭 자기소개는 허용 */
 export function speaksOfSelf(text: string, name: string): boolean {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?![가-힣]{2})`).test(text);
+  // 이름(+님/씨)(+조사)가 한 단어로 쓰였는지: "하은님을", "지후 살린", "서연이 시민"
+  const particle = "(?:이가|이는|이를|이도|이한테|이랑|이|가|은|는|을|를|의|도|에게|한테|랑|과|와|께서|께|이다|야|아)?";
+  return new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?:님|씨)?${particle}(?![가-힣])`).test(text);
 }
 
 /** 죽은 사람에게 말을 거는 문장이면 그 사람의 id */
@@ -484,4 +515,74 @@ export function repeatsQuestion(s: GameState, speaker: number, text: string): bo
   return s.log.some(
     (m) => m.from !== "system" && m.day === s.day && targets.some((n) => m.text.includes(n)) && similarity(m.text, text) >= 0.32,
   );
+}
+
+const ANSWER_MARK = /(때문|이유|그건|그거는|그게|네[,.\s]|예[,.\s]|아니요|아뇨|아니에요|아니야|아닙니다|맞아|맞아요|맞습니다|했어요|했어|했습니다|했죠|봤어요|봤어|라서|해서|거든|모르겠|몰라|없어요|없어|없습니다|있어요|있어|있습니다|근거는|왜냐)/;
+
+/** 질문에 답하지 않고 넘기는 답인지 (답의 표지가 없고, 되묻거나 다른 사람 얘기로 넘어감) */
+export function isEvasive(s: GameState, speaker: number, question: string, reply: string): boolean {
+  if (ANSWER_MARK.test(reply)) return false;
+  const others = s.players.filter((p) => p.id !== speaker && reply.includes(p.name) && !question.includes(p.name));
+  return /\?/.test(reply) || others.length > 0;
+}
+
+const VAGUE_RE = /(정리하고|정리해|지켜보|시간만\s*가|좀\s*더\s*(?:보|들어|지켜)|판단은\s*(?:아끼|보류|미루)|조심스러|애매|글쎄)/;
+
+/** 누구를 왜 의심하는지 없이 겉도는 말인지 */
+export function isVague(s: GameState, speaker: number, text: string): boolean {
+  if (!VAGUE_RE.test(text)) return false;
+  const namesSomeone = s.players.some((p) => p.id !== speaker && text.includes(p.name));
+  const hasReason = /(때문|이유|근거|왜냐|라서|해서|거든|투표|주장|보고|모순)/.test(text);
+  return !(namesSomeone && hasReason);
+}
+
+/**
+ * 자기 이름으로 자기를 부른 부분을 1인칭으로 바꾼다 (다시 쓰기 후에도 남아 있을 때의 마지막 안전장치).
+ * "태오한테" -> "나한테", "하은님을" -> "저를", "지후가" -> "내가/제가"
+ */
+export function fixSelfReference(text: string, name: string, informal: boolean): string {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const I = informal ? { base: "나", subj: "내가", top: "나는", obj: "나를", gen: "내", also: "나도", to: "나한테", with: "나랑" }
+                     : { base: "저", subj: "제가", top: "저는", obj: "저를", gen: "제", also: "저도", to: "저한테", with: "저랑" };
+  const map: Record<string, string> = {
+    "": I.base, 이: I.subj, 가: I.subj, 이가: I.subj, 은: I.top, 는: I.top, 이는: I.top, 을: I.obj, 를: I.obj, 이를: I.obj,
+    의: I.gen, 도: I.also, 이도: I.also, 에게: I.to, 한테: I.to, 이한테: I.to, 께: I.to, 랑: I.with, 이랑: I.with, 과: I.with, 와: I.with,
+  };
+  const re = new RegExp(`(?<!(?:저|나)\\s)(?<![가-힣])${esc}(?:님|씨)?(이가|이는|이를|이도|이한테|이랑|이|가|은|는|을|를|의|도|에게|한테|께|랑|과|와)?(?![가-힣])`, "g");
+  return text.replace(re, (_m, particle: string | undefined) => map[particle ?? ""] ?? I.base);
+}
+
+const ACCUSE_RE = /(의심|수상|마피아|찜찜|이상하|거짓|가짜|몰아|지목)/;
+const TRUST_WORDS = /(믿|시민 쪽|시민쪽|결백)/;
+
+/** 실제로 누가 누구를 의심·지목했는지 (대화와 투표에서) */
+export function accusationPairs(s: GameState): { by: number; target: number; day: number }[] {
+  const out: { by: number; target: number; day: number }[] = [];
+  for (const m of s.log) {
+    if (m.from === "system") {
+      if (!m.text.startsWith("투표 결과")) continue;
+      for (const line of m.text.split("\n")) {
+        const [a, b] = line.split(" → ");
+        const by = s.players.find((p) => p.name === a?.trim());
+        const t = s.players.find((p) => p.name === b?.trim());
+        if (by && t) out.push({ by: by.id, target: t.id, day: m.day });
+      }
+      continue;
+    }
+    if (!ACCUSE_RE.test(m.text) || TRUST_WORDS.test(m.text)) continue;
+    for (const p of s.players) if (p.id !== m.from && m.text.includes(p.name)) out.push({ by: m.from, target: p.id, day: m.day });
+  }
+  return out;
+}
+
+/** "○○가 나를 몰았다/의심했다/찍었다"처럼 말했는데 실제 기록에 그런 일이 없으면 그 사람 id */
+export function fabricatedAccusation(s: GameState, speaker: number, text: string): number | null {
+  const pairs = accusationPairs(s);
+  for (const p of s.players) {
+    if (p.id === speaker) continue;
+    const esc = p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`${esc}(?:님|씨)?(?:이|가|은|는)?[^.!?]{0,20}(?:나를|저를|날|절|나한테|저한테|저에게|나에게)[^.!?]{0,6}(?:몰|의심|지목|찍|투표|공격)`);
+    if (re.test(text) && !pairs.some((x) => x.by === p.id && x.target === speaker)) return p.id;
+  }
+  return null;
 }

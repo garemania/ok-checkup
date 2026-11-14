@@ -1,5 +1,5 @@
 import { speakLastWords, type AI } from "./ai";
-import { addressesDead, interpretByRules, isRepetitive, ruleViolations, deniesRevealedRole } from "./context";
+import { addressesDead, interpretByRules, isRepetitive, ruleViolations, deniesRevealedRole, sanitizeMeaning, detectClaims } from "./context";
 import { HUMAN_ID } from "./data";
 import { nextTurn, openerTurn, proxyHint } from "./director";
 import { addMsg, createGame, kill } from "./engine";
@@ -174,23 +174,45 @@ export async function runSelfTest(ai: AI, fallback: AI, nickname: string, onResu
       if (v === null) abstain++;
       lines.push(`${p.name}(${p.role === "mafia" ? "마피아" : "시민 팀"}) → ${v === null ? "기권" : name(s, v)}`);
     }
-    push({ title: "7. 단서 없는 첫날 투표", lines, checks: [{ label: "근거 없을 때 기권하는 사람이 있음", ok: abstain > 0 }] });
+    push({ title: "7. 첫날 투표 (조금이라도 의심 가면 투표)", lines, checks: [{ label: "대부분은 누군가에게 투표함(전원 기권하지 않음)", ok: abstain < s.players.length - 1 }] });
   }
 
   // 8. 같은 얘기가 맴돌 때
   {
     let s: GameState = { ...game(nickname), day: 3, phase: "day" };
-    s = addMsg(s, 7, "하은, 서연이 어제 얘기 피하는 거 이상하지 않아?", "day");
-    s = addMsg(s, 3, "태오님, 저는 아직 판단이 조심스러워요.", "day");
-    s = addMsg(s, 7, "하은, 그래도 서연 얘기는 그냥 넘기기 어렵잖아.", "day");
+    const loop = [
+      [7, "하은, 서연이 어제 얘기 피하는 거 이상하지 않아?"], [3, "태오님, 저는 아직 판단이 조심스러워요."],
+      [7, "하은, 그래도 서연 얘기는 그냥 넘기기 어렵잖아."], [3, "태오님, 서연님 얘기는 이미 했잖아요."],
+      [7, "하은, 그러니까 서연 얘기 다시 해 보자고."], [3, "태오님, 같은 얘기만 하시네요."],
+      [7, "하은, 서연 얘기 피하지 마."], [3, "태오님, 저는 피한 적 없어요."],
+    ] as const;
+    for (const [id, t] of loop) s = addMsg(s, id, t, "day");
     const t = nextTurn(s)!;
     const said = await ai.speak(s, t.player, t.hint);
     push({
-      title: "8. 같은 얘기가 맴돌 때 화제 전환",
-      lines: ["태오: 하은, 서연이 어제 얘기 피하는 거 이상하지 않아?", "하은: 태오님, 저는 아직 판단이 조심스러워요.", "태오: 하은, 그래도 서연 얘기는 그냥 넘기기 어렵잖아.", `${t.player.name}: ${said.text}`],
+      title: "8. 둘이 같은 얘기를 8마디 넘게 주고받으면 화제 전환",
+      lines: [...loop.map(([id, x]) => `${s.players[id].name}: ${x}`), `${t.player.name}: ${said.text}`],
       checks: [
         { label: "태오·하은이 아닌 사람이 끼어듦", ok: t.player.id !== 7 && t.player.id !== 3 },
         { label: "방금 나온 말을 되풀이하지 않음", ok: !isRepetitive(s, t.player.id, said.text) },
+      ],
+    });
+  }
+  // 9. 규칙을 말한 것은 직업 주장이 아님
+  {
+    let s: GameState = { ...game(nickname), day: 2, phase: "day" };
+    const text = "의사만 보호 능력이 있잖아요";
+    s = addMsg(s, HUMAN_ID, text, "day");
+    const raw = await ai.interpret(s, text);
+    const meaning = sanitizeMeaning(text, raw ?? interpretByRules(text, s.players, HUMAN_ID));
+    s = { ...s, log: s.log.map((m, i) => (i === s.log.length - 1 ? { ...m, meaning } : m)) };
+    const said = await ai.speak(s, s.players[2], `[반응:플레이어(${nickname})] 직전 발언(플레이어(${nickname}): "${text}")에 자연스럽게 반응하세요.`);
+    push({
+      title: "9. 규칙을 말한 것은 직업 주장이 아님",
+      lines: [`나: ${text}`, `해석: ${meaning.summary ?? "(직업 주장 아님)"}`, `도윤: ${said.text}`],
+      checks: [
+        { label: "의사 주장으로 해석하지 않음", ok: !meaning.claim && !meaning.saves && detectClaims(s)[HUMAN_ID] === undefined },
+        { label: "'의사라고 주장했다'고 말하지 않음", ok: !/의사\s*(?:라고|라며|를)?\s*(?:주장|했다가|라고 했)/.test(said.text) },
       ],
     });
   }

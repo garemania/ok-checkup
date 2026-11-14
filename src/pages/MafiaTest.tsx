@@ -45,7 +45,7 @@ const MafiaTest = () => {
         <Link to="/mafia" className="text-xs underline">게임으로</Link>
       </div>
       <p className="text-muted-foreground">
-        설정에 저장된 키로 실제 AI를 호출해 그동안 문제가 됐던 상황을 재현하고 자동으로 판정합니다. 키는 이 기기 밖으로 나가지 않습니다. 호출은 약 20회입니다.
+        설정에 저장된 키로 실제 AI를 호출해 그동안 문제가 됐던 상황을 재현하고 자동으로 판정합니다. 키는 이 기기 밖으로 나가지 않습니다. 호출은 약 25회입니다.
       </p>
       <p>현재 AI: <b>{label}</b>{!usingApi && " — 설정에서 Claude API를 켜야 실제 호출로 시험합니다."}</p>
       <div className="flex gap-2">

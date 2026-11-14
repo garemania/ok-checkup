@@ -2,7 +2,6 @@ import type { Look, Role } from "./types";
 
 export const HUMAN_ID = 0;
 export const MAX_ROUNDS = 3; // 하루 토론 라운드 상한
-export const MAX_WHISPERS_PER_DAY = 8; // 하루 1:1 대화 가능 횟수
 export const WATCH_LINES = 4; // 지켜보기 한 번에 오가는 대사 수
 export const AUTO_ADVANCE_MS = 3500; // 자동 넘기기를 켰을 때 다음 대사로 넘어가는 간격
 export const MAX_AUTO_SPEAK_PER_DAY = 3; // 하루에 내 캐릭터가 자동으로 말하는 최대 횟수
