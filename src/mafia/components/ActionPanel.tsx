@@ -21,6 +21,7 @@ interface Props {
   awaitingHuman: boolean;
   guesses?: Record<number, Role | null>; // 내 직업 추정 메모 (대상 고르기에 표시)
   target: number | null;
+  partnerAdvice?: { target: number; text: string } | null; // 내가 마피아일 때 AI 동료의 습격 제안
   talkTo: number | null; // 말을 걸 대상 (얼굴을 누르거나 목록에서 고름, 없으면 모두에게)
   setTalkTo: (id: number | null) => void;
   setTarget: (id: number | null) => void;
@@ -51,7 +52,7 @@ const ACTIONS = [
 type ActionKind = (typeof ACTIONS)[number]["kind"];
 const CLAIM_ROLES: Role[] = ["police", "doctor", "soldier", "mafia", "citizen"];
 
-export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, guesses = {}, target, talkTo, setTalkTo, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
+export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWatch, awaitingHuman, guesses = {}, target, partnerAdvice, talkTo, setTalkTo, setTarget, onNight, onRound, onSend, onAction, onStartVote, onVote, onDefense, onVerdict, onRestart }: Props) {
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (talkTo !== null) inputRef.current?.focus(); }, [talkTo]);
@@ -131,6 +132,12 @@ export function ActionPanel({ state, busy, waiting, watching, onWatch, onStopWat
     return (
       <div className="space-y-3 p-4">
         <p className="flex items-center gap-1.5 text-sm font-medium"><RoleIcon role={me.role} />{cfg.title}</p>
+        {me.role === "mafia" && partnerAdvice && (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/50 px-3 py-2 text-xs">
+            <span>{partnerAdvice.text}</span>
+            {target !== partnerAdvice.target && <Button size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs" onClick={() => setTarget(partnerAdvice.target)}>따르기</Button>}
+          </div>
+        )}
         <TargetPicker includeSelf={false} excludeMafia />
         <Button className="w-full" disabled={target === null} onClick={() => { onNight(target!); setTarget(null); }}>{cfg.cta}</Button>
       </div>

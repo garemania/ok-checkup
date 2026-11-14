@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { HUMAN_ID } from "../data";
-import { mafiaPartners } from "../engine";
+import { hasBatchim, mafiaPartners } from "../engine";
 import { ROLE_DESC, ROLE_LABEL } from "../types";
 import { RoleIcon } from "./RoleIcon";
 import type { GameState } from "../types";
@@ -14,7 +14,7 @@ export function InfoDialog({ state, open, onOpenChange }: { state: GameState; op
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><RoleIcon role={me.role} className="h-5 w-5" /> 당신은 {ROLE_LABEL[me.role]}입니다</DialogTitle>
-          <DialogDescription>{ROLE_DESC[me.role]}</DialogDescription>
+          <DialogDescription>{ROLE_DESC[me.role]} 다른 사람들은 당신을 "{me.name}{hasBatchim(me.name) ? "이" : ""}"라고 부릅니다.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           {me.role === "mafia" && (

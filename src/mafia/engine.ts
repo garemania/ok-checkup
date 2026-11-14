@@ -118,6 +118,17 @@ export function hasBatchim(word: string): boolean {
   return code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0;
 }
 
+/** 이름 뒤 조사를 받침에 맞게 고친다 ("하은가" → "하은이", "지후을" → "지후를") */
+export function fixJosa(text: string, names: string[]): string {
+  let out = text;
+  for (const n of names) {
+    const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pairs = hasBatchim(n) ? [["가", "이"], ["는", "은"], ["를", "을"], ["와", "과"]] : [["이", "가"], ["은", "는"], ["을", "를"], ["과", "와"]];
+    for (const [wrong, right] of pairs) out = out.replace(new RegExp(`${esc}${wrong}(?=[\\s.,!?~]|$)`, "g"), n + right);
+  }
+  return out;
+}
+
 export function wasPhrase(word: string): string {
   return `${word}${hasBatchim(word) ? "이었" : "였"}습니다`;
 }

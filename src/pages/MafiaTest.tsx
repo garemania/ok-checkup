@@ -1,3 +1,4 @@
+import { playerName } from "@/mafia/data";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ const MafiaTest = () => {
     const ai = makeAI(settings, (e) => setErrors((x) => [...x, e.message]));
     const fallback = makeAI({ ...settings, mode: "mock" }, () => {});
     try {
-      await runSelfTest(ai, fallback, settings.nickname || "나", (r) => setResults((x) => [...x, r]));
+      await runSelfTest(ai, fallback, playerName(settings.nickname), (r) => setResults((x) => [...x, r]));
     } catch (e) {
       setErrors((x) => [...x, (e as Error).message]);
     }

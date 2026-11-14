@@ -20,8 +20,8 @@ export function SettingsDialog({ open, onOpenChange, settings, onSave, errors = 
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label>내 닉네임 (새 게임부터 적용)</Label>
-            <Input value={s.nickname} maxLength={8} onChange={(e) => setS({ ...s, nickname: e.target.value })} />
+            <Label>내 이름 (AI들이 이 이름으로 부름 · 비우면 준호 · 새 게임부터)</Label>
+            <Input value={s.nickname} placeholder="준호" maxLength={8} onChange={(e) => setS({ ...s, nickname: e.target.value })} />
           </div>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
             <div>

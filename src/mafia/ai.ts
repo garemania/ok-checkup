@@ -1,6 +1,6 @@
-import { alive, mafiaPartners, nameOf, pick } from "./engine";
+import { alive, fixJosa, mafiaPartners, nameOf, pick } from "./engine";
 import { TRUST_RE } from "./director";
-import { addressesDead, deniesRevealedRole, detectClaims, fabricatedAccusation, fixSelfReference, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
+import { addressesDead, deniesRevealedRole, detectClaims, fabricatedAccusation, fixSelfReference, killAdvice, isEvasive, isRepetitive, isVague, reasoningNotes, repeatsQuestion, ruleViolations, detectReports, factsBlock, focusBlock, speaksOfSelf, transcriptFor } from "./context";
 import { HUMAN_ID } from "./data";
 import { detectEmotion, parseSpoken } from "./emotion";
 import { ROLE_LABEL } from "./types";
@@ -328,7 +328,7 @@ async function askSpoken(settings: Settings, s: GameState, p: Player, task: stri
   if (speaksOfSelf(spoken.text, p.name)) {
     spoken = { ...spoken, text: fixSelfReference(spoken.text, p.name, /(반말|털털|가벼운|단호|평어)/.test(p.speech)) };
   }
-  return spoken;
+  return { ...spoken, text: fixJosa(spoken.text, s.players.map((x) => x.name)) };
 }
 
 export function makeAI(settings: Settings, onError: (e: Error) => void): AI {
@@ -666,14 +666,14 @@ function makeMockAI(): AI {
       await wait(200);
       const pool = alive(s);
       if (kind === "kill") {
-        const t = pool.filter((x) => x.role !== "mafia");
-        const claimers = t.filter((x) => s.log.some((m) => m.from === x.id && /제가 (경찰|의사)/.test(m.text)));
-        return (claimers.length ? pick(claimers) : pick(t)).id;
+        const advice = killAdvice(s);
+        return advice ? advice.target : pick(pool.filter((x) => x.role !== "mafia")).id;
       }
       if (kind === "protect") {
         // 의사는 자기 자신을 보호할 수 없다
         const others = pool.filter((x) => x.id !== p.id);
-        const claimers = others.filter((x) => s.log.some((m) => m.from === x.id && /제가 경찰/.test(m.text)));
+        const claims = detectClaims(s);
+        const claimers = others.filter((x) => claims[x.id] === "police");
         return (claimers.length ? pick(claimers) : pick(others)).id;
       }
       const done = (s.policeLog[p.id] ?? []).map((r) => r.target);
@@ -699,6 +699,7 @@ function makeMockAI(): AI {
       // 최근에 누가 이미 한 말과 똑같은 문장은 피한다 (몇 번 다시 고른다)
       let text = await raw.speak(s, p, hint);
       for (let i = 0; i < 5 && (isRepetitive(s, p.id, text) || repeatsQuestion(s, p.id, text)); i++) text = await raw.speak(s, p, hint);
+      text = fixJosa(text, s.players.map((x) => x.name));
       return { text, emotion: detectEmotion(text) };
     },
     vote: raw.vote,

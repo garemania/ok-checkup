@@ -1278,3 +1278,30 @@ describe("no made-up accusations", () => {
     } finally { globalThis.fetch = orig; }
   });
 });
+
+describe("small fixes", () => {
+  it("fixes particles after names", async () => {
+    const { fixJosa } = await import("./engine");
+    const names = ["하은", "지후", "서연"];
+    expect(fixJosa("하은가 이유 없이 표를 옮겼어.", names)).toBe("하은이 이유 없이 표를 옮겼어.");
+    expect(fixJosa("난 지후을 봐. 서연는 몰라.", names)).toBe("난 지후를 봐. 서연은 몰라.");
+    expect(fixJosa("하은이는 괜찮아. 하은이 말했잖아.", names)).toBe("하은이는 괜찮아. 하은이 말했잖아.");
+  });
+
+  it("never calls the player 나", async () => {
+    const { playerName } = await import("./data");
+    expect(playerName("나")).toBe("준호");
+    expect(playerName("  ")).toBe("준호");
+    expect(playerName("민수")).toBe("민수");
+  });
+
+  it("mafia partner suggests a claimed police first, then whoever hunts the mafia", async () => {
+    const { killAdvice } = await import("./context");
+    let s = { ...createGame("나"), day: 2 };
+    s.players.forEach((p, i) => { p.role = i === 0 || i === 7 ? "mafia" : "citizen"; });
+    s = addMsg(s, 3, "태오가 제일 수상해", "day");
+    expect(killAdvice(s)!.target).toBe(3);
+    s = addMsg(s, 5, "제가 경찰입니다. 어젯밤 하은을 조사했어요.", "day");
+    expect(killAdvice(s)!.target).toBe(5);
+  });
+});

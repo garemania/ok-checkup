@@ -20,6 +20,13 @@ export interface Character {
   look: Look;
 }
 
+/** 닉네임을 정하지 않았거나 "나"로 두면 AI들이 이 이름으로 부른다 ("나님"처럼 어색해지지 않게) */
+export const DEFAULT_PLAYER_NAME = "준호";
+export const playerName = (nickname: string): string => {
+  const n = nickname.trim();
+  return !n || n === "나" ? DEFAULT_PLAYER_NAME : n;
+};
+
 export const HUMAN_CHAR: Character = {
   name: "나", emoji: "🙂", color: 45, persona: "플레이어", speech: "",
   look: { hair: "short", hairColor: "#2a211b", ears: null, accessory: "headband" },

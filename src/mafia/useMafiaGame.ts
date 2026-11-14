@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { makeAI, speakLastWords } from "./ai";
 import { nextTurn, openerTurn } from "./director";
-import { AUTO_ADVANCE_MS, HUMAN_ID, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, WATCH_LINES } from "./data";
+import { AUTO_ADVANCE_MS, HUMAN_ID, playerName, MAX_ACTIONS_PER_DAY, MAX_AUTO_SPEAK_PER_DAY, MAX_ROUNDS, WATCH_LINES } from "./data";
 import { detectClaims, interpretByRules, noDeathOnNight, normalizeHuman, sanitizeMeaning } from "./context";
 import { addMsg, alive, aliveAI, createGame, finishIfWon, kill, mafiaPartners, me, hasBatchim, nameOf, resolveNight, tallyVerdict, tallyVotes, wasPhrase } from "./engine";
 import { GUESS_ORDER, ROLE_LABEL } from "./types";
@@ -16,7 +16,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
   baseUrl: "https://api.anthropic.com",
   model: "claude-haiku-5-5",
-  nickname: "나",
+  nickname: "",
   autoSpeak: true,
   autoAdvance: false,
 };
@@ -131,7 +131,7 @@ export function useMafiaGame(onError: (msg: string) => void) {
     setWatching(false);
     advance();
     resolveHuman(null);
-    ref.current = createGame(settings.nickname);
+    ref.current = createGame(playerName(settings.nickname));
     setState(ref.current);
     setBusy(false);
     setSpeaking(null);

@@ -586,3 +586,20 @@ export function fabricatedAccusation(s: GameState, speaker: number, text: string
   }
   return null;
 }
+
+/** 마피아가 오늘 밤 노릴 만한 사람과 그 이유 (오프라인 AI의 습격 대상, 사람이 마피아일 때 동료 의견) */
+export function killAdvice(s: GameState, rnd: () => number = Math.random): { target: number; reason: string } | null {
+  const pool = s.players.filter((p) => p.alive && p.role !== "mafia");
+  if (!pool.length) return null;
+  const claims = detectClaims(s);
+  const police = pool.find((p) => claims[p.id] === "police");
+  if (police) return { target: police.id, reason: "경찰이라고 했으니 살려 두면 우리가 조사당한다" };
+  const doctor = pool.find((p) => claims[p.id] === "doctor");
+  if (doctor) return { target: doctor.id, reason: "의사라고 했으니 먼저 없애야 습격이 막히지 않는다" };
+  const mafia = new Set(s.players.filter((p) => p.role === "mafia").map((p) => p.id));
+  const count: Record<number, number> = {};
+  for (const x of accusationPairs(s)) if (mafia.has(x.target) && pool.some((p) => p.id === x.by)) count[x.by] = (count[x.by] ?? 0) + 1;
+  const hunter = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
+  if (hunter) return { target: Number(hunter[0]), reason: "우리 쪽을 계속 의심하고 있다" };
+  return { target: pool[Math.floor(rnd() * pool.length)].id, reason: "아직 단서가 없으니 눈에 띄지 않게 아무나" };
+}

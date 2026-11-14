@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,7 +14,8 @@ import { SettingsDialog } from "@/mafia/components/SettingsDialog";
 import { InfoDialog } from "@/mafia/components/InfoDialog";
 import { useMafiaGame } from "@/mafia/useMafiaGame";
 import { HUMAN_ID } from "@/mafia/data";
-import { emotionOf, tallyVotes } from "@/mafia/engine";
+import { emotionOf, mafiaPartners, tallyVotes } from "@/mafia/engine";
+import { killAdvice } from "@/mafia/context";
 import { ROLE_LABEL } from "@/mafia/types";
 import { RoleIcon } from "@/mafia/components/RoleIcon";
 
@@ -47,6 +48,15 @@ const Mafia = () => {
       toast("어젯밤 마피아가 당신을 노렸지만 버텨냈습니다(나만 앎). 방어 능력은 이제 없습니다.", { duration: 8000 });
     const prot = (state.doctorLog[HUMAN_ID] ?? []).find((r) => r.day === state.day);
     if (prot) toast(`보호 결과(나만 앎): ${state.players[prot.target].name}님을 지킨 밤, ${prot.quiet ? "아무도 죽지 않았습니다(막았을 수도, 군인이 버텼을 수도)" : "다른 사람이 죽었습니다"}.`, { duration: 8000 });
+  }, [state?.day, state?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 내가 마피아일 때, 살아 있는 AI 동료가 오늘 밤 노릴 사람을 제안한다 (밤마다 한 번 정함)
+  const partnerAdvice = useMemo(() => {
+    if (!state || state.phase !== "night" || state.day === 1) return null;
+    const meP = state.players[HUMAN_ID];
+    if (meP.role !== "mafia" || !meP.alive) return null;
+    const partner = mafiaPartners(state, HUMAN_ID).find((p) => p.alive && !p.isHuman);
+    const a = partner ? killAdvice(state) : null;
+    return partner && a ? { partner: partner.name, target: a.target, text: `동료 ${partner.name}의 의견: 오늘 밤은 ${state.players[a.target].name}. ${a.reason}.` } : null;
   }, [state?.day, state?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state && state.log.length === 1) setInfoOpen(true); }, [state?.log.length === 1]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -130,6 +140,7 @@ const Mafia = () => {
             guesses={g.guesses}
             target={target}
             talkTo={talkTarget}
+            partnerAdvice={partnerAdvice}
             setTalkTo={setTalkTo}
             setTarget={setTarget}
             onNight={g.runNight}
