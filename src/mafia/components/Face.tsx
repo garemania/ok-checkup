@@ -35,7 +35,7 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
     >
       <div
         className={cn(
-          "relative aspect-square w-full max-w-11 rounded-md shadow-md transition sm:max-w-16 sm:rounded-lg",
+          "relative aspect-square w-full max-w-11 rounded-md shadow-md transition sm:max-w-16 sm:rounded-lg md:max-w-[88px]",
           isMe && "outline outline-2 outline-primary sm:outline-0",
           speaking && "ring-2 ring-primary ring-offset-1 ring-offset-background animate-pulse sm:ring-4 sm:ring-offset-2",
           !p.alive && "opacity-60 grayscale",
@@ -51,7 +51,7 @@ export function Face({ player: p, emotion, isMe, speaking, showRole, mark, voteC
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground sm:h-5 sm:min-w-5 sm:text-xs">{voteCount}</span>
         ) : null}
       </div>
-      <div className="flex max-w-full items-center gap-0.5 truncate text-[10px] font-medium sm:text-xs">
+      <div className="flex max-w-full items-center gap-0.5 truncate text-[10px] font-medium sm:text-xs md:text-sm">
         {isMe && <span className="hidden rounded bg-primary px-1 text-[10px] text-primary-foreground sm:inline">ME</span>}
         <span className={cn(!p.alive && "line-through text-muted-foreground")}>{p.name}</span>
       </div>

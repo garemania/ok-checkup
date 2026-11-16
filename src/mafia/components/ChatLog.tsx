@@ -7,10 +7,11 @@ import { addresseeOf } from "../context";
 import { EMOTION_LABEL } from "../emotion";
 
 export function ChatLog({ state, speaking }: { state: GameState; speaking: number | null }) {
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [state.log.length, speaking]);
+  const box = useRef<HTMLDivElement>(null);
+  // 이 상자 안에서만 맨 아래로 스크롤한다 (화면 전체가 움직이지 않게)
+  useEffect(() => { const el = box.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }, [state.log.length, speaking]);
   return (
-    <div className="flex h-full flex-col gap-2 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
+    <div ref={box} className="flex h-full flex-col gap-2 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
       {state.log.map((m) => {
         if (m.from === "system") {
           return (
@@ -46,7 +47,6 @@ export function ChatLog({ state, speaking }: { state: GameState; speaking: numbe
           <span className="animate-pulse">...</span>
         </div>
       )}
-      <div ref={end} />
     </div>
   );
 }

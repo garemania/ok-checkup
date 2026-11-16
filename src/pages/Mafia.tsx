@@ -9,6 +9,7 @@ import { SpeakerStage } from "@/mafia/components/SpeakerStage";
 import { StartScreen } from "@/mafia/components/StartScreen";
 import { PhaseBanner } from "@/mafia/components/PhaseBanner";
 import { LogSheet } from "@/mafia/components/LogSheet";
+import { ChatLog } from "@/mafia/components/ChatLog";
 import { ActionPanel } from "@/mafia/components/ActionPanel";
 import { SettingsDialog } from "@/mafia/components/SettingsDialog";
 import { InfoDialog } from "@/mafia/components/InfoDialog";
@@ -97,63 +98,76 @@ const Mafia = () => {
   return (
     <div className={`min-h-screen transition-colors duration-700 ${night ? "bg-[hsl(230_35%_7%)]" : "bg-background"}`}>
       <InkDefs />
-      <div className="mx-auto flex h-dvh max-w-3xl flex-col gap-2 p-2 sm:gap-3 sm:p-4">
+      <div className="mx-auto flex h-dvh max-w-3xl flex-col gap-2 p-2 sm:gap-3 sm:p-4 md:max-w-6xl">
         <TopBar state={state} onSettings={() => setSettingsOpen(true)} onInfo={() => setInfoOpen(true)} onLog={() => setLogOpen(true)} />
 
-        <section className="grid grid-cols-8 gap-0 rounded-xl border border-border bg-card/60 p-1 sm:grid-cols-4 sm:gap-1 sm:rounded-2xl sm:p-2">
-          {state.players.map((p) => {
-            const known = p.isHuman || state.phase === "gameover" || p.revealed || (me.role === "mafia" && p.role === "mafia");
-            const inv = myPolice.find((r) => r.target === p.id);
-            return (
-              <Face
-                key={p.id}
-                player={p}
-                emotion={emotionOf(state, p.id)}
-                isMe={p.isHuman}
-                speaking={g.speaking === p.id}
-                showRole={known}
-                mark={inv ? (inv.isMafia ? "mafia" : "clean") : null}
-                voteCount={state.phase === "vote" && Object.keys(state.votes).length ? counts[p.id] : undefined}
-                selected={target === p.id || talkTarget === p.id}
-                guess={g.guesses[p.id] ?? null}
-                onGuess={p.isHuman ? undefined : () => g.cycleGuess(p.id)}
-                onClick={() => onFace(p.id)}
-              />
-            );
-          })}
-        </section>
+        {/* 폰: 위아래 한 줄. 펼친 폴더블·태블릿(md 이상): 왼쪽 얼굴+대사, 오른쪽 대화 기록+행동 */}
+        <div className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3 md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(320px,1fr)]">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3">
+          <section className="grid shrink-0 grid-cols-8 gap-0 rounded-xl border border-border bg-card/60 p-1 sm:grid-cols-4 sm:gap-1 sm:rounded-2xl sm:p-2 md:gap-2 md:p-3">
+            {state.players.map((p) => {
+              const known = p.isHuman || state.phase === "gameover" || p.revealed || (me.role === "mafia" && p.role === "mafia");
+              const inv = myPolice.find((r) => r.target === p.id);
+              return (
+                <Face
+                  key={p.id}
+                  player={p}
+                  emotion={emotionOf(state, p.id)}
+                  isMe={p.isHuman}
+                  speaking={g.speaking === p.id}
+                  showRole={known}
+                  mark={inv ? (inv.isMafia ? "mafia" : "clean") : null}
+                  voteCount={state.phase === "vote" && Object.keys(state.votes).length ? counts[p.id] : undefined}
+                  selected={target === p.id || talkTarget === p.id}
+                  guess={g.guesses[p.id] ?? null}
+                  onGuess={p.isHuman ? undefined : () => g.cycleGuess(p.id)}
+                  onClick={() => onFace(p.id)}
+                />
+              );
+            })}
+          </section>
 
-        <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} watching={g.watching} autoAdvance={g.settings.autoAdvance} onToggleAuto={g.toggleAutoAdvance} onNext={g.advance} />
+          <SpeakerStage state={state} speaking={g.speaking} waiting={g.waiting} watching={g.watching} autoAdvance={g.settings.autoAdvance} onToggleAuto={g.toggleAutoAdvance} onNext={g.advance} />
+          </div>
 
-        <footer className="rounded-2xl border border-border bg-card">
-          {target !== null && (state.phase === "night" || state.phase === "vote") && (
-            <div className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">선택됨: {state.players[target].name}</div>
-          )}
-          <ActionPanel
-            state={state}
-            busy={g.busy}
-            waiting={g.waiting}
-            watching={g.watching}
-            onWatch={g.runWatch}
-            onStopWatch={g.stopWatch}
-            awaitingHuman={g.awaitingHuman}
-            guesses={g.guesses}
-            target={target}
-            talkTo={talkTarget}
-            partnerAdvice={partnerAdvice}
-            setTalkTo={setTalkTo}
-            setTarget={setTarget}
-            onNight={g.runNight}
-            onRound={g.runRound}
-            onSend={g.sendPublic}
-            onAction={g.doAction}
-            onStartVote={g.startVote}
-            onDefense={g.submitDefense}
-            onVerdict={g.submitVerdict}
-            onVote={g.runVote}
-            onRestart={g.quit}
-          />
-        </footer>
+          <div className="flex shrink-0 flex-col gap-2 sm:gap-3 md:min-h-0">
+            <section className="hidden min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card/60 md:flex">
+              <div className="border-b border-border px-4 py-2 text-sm font-semibold">대화 기록</div>
+              <div className="min-h-0 flex-1">
+                <ChatLog state={state} speaking={g.speaking} />
+              </div>
+            </section>
+          <footer className="shrink-0 rounded-2xl border border-border bg-card">
+            {target !== null && (state.phase === "night" || state.phase === "vote") && (
+              <div className="border-b border-border px-4 py-1.5 text-xs text-muted-foreground">선택됨: {state.players[target].name}</div>
+            )}
+            <ActionPanel
+              state={state}
+              busy={g.busy}
+              waiting={g.waiting}
+              watching={g.watching}
+              onWatch={g.runWatch}
+              onStopWatch={g.stopWatch}
+              awaitingHuman={g.awaitingHuman}
+              guesses={g.guesses}
+              target={target}
+              talkTo={talkTarget}
+              partnerAdvice={partnerAdvice}
+              setTalkTo={setTalkTo}
+              setTarget={setTarget}
+              onNight={g.runNight}
+              onRound={g.runRound}
+              onSend={g.sendPublic}
+              onAction={g.doAction}
+              onStartVote={g.startVote}
+              onDefense={g.submitDefense}
+              onVerdict={g.submitVerdict}
+              onVote={g.runVote}
+              onRestart={g.quit}
+            />
+          </footer>
+          </div>
+        </div>
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={g.settings} onSave={g.setSettings} errors={g.errors} onClearErrors={g.clearErrors} />

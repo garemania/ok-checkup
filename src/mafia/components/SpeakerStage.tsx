@@ -26,7 +26,7 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
     if (last.from === "system") {
       body = (
         <div key={last.id} className="flex h-full items-center justify-center p-2 animate-in sm:p-3 fade-in duration-200">
-          <div className="max-h-full w-full overflow-y-auto rounded-xl border-2 border-black bg-[#e9e1d2] px-4 py-3 text-center text-sm font-semibold leading-relaxed text-black shadow-[3px_3px_0_0_#000] whitespace-pre-line sm:text-base">
+          <div className="max-h-full w-full overflow-y-auto rounded-xl border-2 border-black bg-[#e9e1d2] px-4 py-3 text-center text-sm font-semibold leading-relaxed text-black shadow-[3px_3px_0_0_#000] whitespace-pre-line sm:text-base md:text-lg">
             {last.text}
           </div>
         </div>
@@ -38,14 +38,14 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
       const toName = to !== null ? state.players[to].name : null;
       const loud = emotion === "angry" || emotion === "surprised" || emotion === "scared";
       body = (
-        <div key={last.id} className="flex h-full items-stretch gap-2 p-2 animate-in sm:gap-3 sm:p-3 fade-in slide-in-from-left-4 duration-200">
-          <div className={cn("relative h-24 w-24 shrink-0 self-start sm:h-32 sm:w-32", loud && "animate-[shake_0.35s_ease-in-out]")}>
+        <div key={last.id} className="flex h-full items-stretch gap-2 p-2 animate-in sm:gap-3 sm:p-3 md:flex-col md:items-center md:gap-4 md:p-4 fade-in slide-in-from-left-4 duration-200">
+          <div className={cn("relative h-24 w-24 shrink-0 self-start sm:h-32 sm:w-32 md:h-[min(13rem,22dvh)] md:w-[min(13rem,22dvh)] md:self-center", loud && "animate-[shake_0.35s_ease-in-out]")}>
             <FaceArt look={p.look} hue={p.color} emotion={emotion} className="h-full w-full rounded-lg shadow-lg" rough />
             <span className="absolute -bottom-1 left-1 rounded bg-black px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
               {p.name}{last.auto ? " (자동)" : ""} · {EMOTION_LABEL[emotion]}
             </span>
           </div>
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="relative min-h-0 min-w-0 flex-1 md:w-full">
             {(() => {
               const q = last.replyTo !== undefined ? state.log.find((m) => m.id === last.replyTo) : undefined;
               if (q && q.from !== "system") {
@@ -60,13 +60,13 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
             })()}
             <div
               className={cn(
-                "relative max-h-full overflow-y-auto rounded-xl border-2 border-black bg-[#f4efe6] px-3 py-2 text-sm font-semibold leading-snug text-black shadow-[3px_3px_0_0_#000] sm:text-base",
+                "relative max-h-full overflow-y-auto rounded-xl border-2 border-black bg-[#f4efe6] px-3 py-2 text-sm font-semibold leading-snug text-black shadow-[3px_3px_0_0_#000] sm:text-base md:px-4 md:py-3 md:text-lg",
                 loud && "border-[3px] font-extrabold",
               )}
             >
               {last.text}
             </div>
-            <span className="absolute -left-[9px] top-5 h-0 w-0 border-y-[7px] border-r-[9px] border-y-transparent border-r-black" />
+            <span className="absolute -left-[9px] top-5 h-0 w-0 border-y-[7px] border-r-[9px] border-y-transparent border-r-black md:hidden" />
           </div>
         </div>
       );
@@ -93,7 +93,7 @@ export function SpeakerStage({ state, speaking, waiting, watching, autoAdvance, 
           ) : state.phase === "night" ? (
             <><Moon className="h-4 w-4" />밤입니다</>
           ) : (
-            <span className="truncate">대화 기록은 위쪽 두루마리 버튼</span>
+            <span className="truncate md:hidden">대화 기록은 위쪽 두루마리 버튼</span>
           )}
         </span>
         {onToggleAuto && (state.phase === "day" || state.phase === "vote" || state.phase === "trial") && (
